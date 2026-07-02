@@ -76,3 +76,16 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface VideoCall {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole: Role;
+  receiverId: string;
+  receiverName: string;
+  meetLink: string;
+  status: 'pending' | 'accepted' | 'declined' | 'ended';
+  createdAt: string;
+}
+
+

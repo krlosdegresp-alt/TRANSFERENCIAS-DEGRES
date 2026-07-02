@@ -5,7 +5,8 @@ import {
   deleteChatMessage,
   subscribeToDatabase, 
   getUsers,
-  getCierresCaja
+  getCierresCaja,
+  startVideoCall
 } from '../firebase';
 import { ChatMessage, User, Role } from '../types';
 import { 
@@ -18,7 +19,8 @@ import {
   Sparkles,
   Trash2,
   AlertCircle,
-  User as UserIcon
+  User as UserIcon,
+  Video
 } from 'lucide-react';
 
 interface ChatSoporteProps {
@@ -368,6 +370,31 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                 </option>
               ))}
             </select>
+            {selectedThread !== 'general' && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const targetUser = allowedRecipients.find(r => r.id === selectedThread);
+                  if (targetUser) {
+                    try {
+                      await startVideoCall(
+                        currentUser.id,
+                        currentUser.nombre,
+                        currentUser.role,
+                        targetUser.id,
+                        targetUser.nombre
+                      );
+                    } catch (e) {
+                      console.error("Error starting video call:", e);
+                    }
+                  }
+                }}
+                className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0"
+                title="Llamar por Google Meet"
+              >
+                <Video className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
           {/* Write permission warning notice or helpful tips */}

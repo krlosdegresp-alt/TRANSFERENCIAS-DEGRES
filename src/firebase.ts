@@ -12,7 +12,7 @@ import {
   writeBatch 
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage } from './types';
+import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall } from './types';
 import { getColombiaDateTime } from './utils/formato';
 
 // Firebase configuration from firebase-applet-config.json
@@ -52,6 +52,7 @@ const STORAGE_LOGS_KEY = 'transf_audit_logs';
 const STORAGE_CIERRES_KEY = 'transf_cierres_caja';
 const STORAGE_BATCHES_KEY = 'transf_upload_batches';
 const STORAGE_CHAT_KEY = 'transferencias_chat_messages';
+const STORAGE_VIDEOCALLS_KEY = 'transferencias_videocalls';
 
 // Initial mockup data for transactions so that the dashboard doesn't start completely blank if no data is in cloud
 const INITIAL_TRANSACTIONS: Transaction[] = [
@@ -263,6 +264,20 @@ export function initializeRealtimeListeners() {
     chatList.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
     localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(chatList));
+    notifyListeners();
+  });
+
+  // 7. Video calls listener
+  onSnapshot(collection(db, 'videocalls'), (snapshot) => {
+    let callsList: VideoCall[] = [];
+    snapshot.forEach(docSnap => {
+      callsList.push(docSnap.data() as VideoCall);
+    });
+
+    // Sort: newest first
+    callsList.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(callsList));
     notifyListeners();
   });
 }
@@ -953,3 +968,76 @@ export function deleteChatMessage(id: string): boolean {
   }
   return false;
 }
+
+// ----------------------------------------------------
+// VIDEO CALLS OPERATIONS
+// ----------------------------------------------------
+function generateGoogleMeetLink(): string {
+  const letters = 'abcdefghijklmnopqrstuvwxyz';
+  const randSec = (len: number) => Array.from({ length: len }, () => letters[Math.floor(Math.random() * letters.length)]).join('');
+  return `https://meet.google.com/${randSec(3)}-${randSec(4)}-${randSec(3)}`;
+}
+
+export function getVideoCalls(): VideoCall[] {
+  const data = localStorage.getItem(STORAGE_VIDEOCALLS_KEY);
+  if (!data) return [];
+  try {
+    return JSON.parse(data) as VideoCall[];
+  } catch (e) {
+    return [];
+  }
+}
+
+export async function startVideoCall(
+  senderId: string,
+  senderName: string,
+  senderRole: Role,
+  receiverId: string,
+  receiverName: string
+): Promise<VideoCall> {
+  const id = `call_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+  const meetLink = generateGoogleMeetLink();
+  const newCall: VideoCall = {
+    id,
+    senderId,
+    senderName,
+    senderRole,
+    receiverId,
+    receiverName,
+    meetLink,
+    status: 'pending',
+    createdAt: getColombiaDateTime().dateTimeStr
+  };
+
+  const currentCalls = getVideoCalls();
+  currentCalls.unshift(newCall);
+  localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(currentCalls));
+  notifyListeners();
+
+  await setDoc(doc(db, 'videocalls', id), newCall);
+  addAuditLog(senderName, 'Llamada de Meet Iniciada', `Inició una videollamada de Google Meet para ${receiverName}.`);
+
+  return newCall;
+}
+
+export async function updateVideoCallStatus(callId: string, status: 'accepted' | 'declined' | 'ended'): Promise<void> {
+  const calls = getVideoCalls();
+  const index = calls.findIndex(c => c.id === callId);
+  if (index !== -1) {
+    const call = calls[index];
+    call.status = status;
+    localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(calls));
+    notifyListeners();
+
+    await setDoc(doc(db, 'videocalls', callId), { status }, { merge: true });
+
+    if (status === 'accepted') {
+      addAuditLog(call.receiverName, 'Llamada de Meet Aceptada', `Aceptó la videollamada de Google Meet de ${call.senderName}.`);
+    } else if (status === 'declined') {
+      addAuditLog(call.receiverName, 'Llamada de Meet Rechazada', `Rechazó la videollamada de Google Meet de ${call.senderName}.`);
+    } else if (status === 'ended') {
+      addAuditLog(call.senderName, 'Llamada de Meet Finalizada', `Finalizó la videollamada de Google Meet con ${call.receiverName}.`);
+    }
+  }
+}
+

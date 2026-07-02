@@ -8,6 +8,7 @@ import Transacciones from './components/Transacciones';
 import Reportes from './components/Reportes';
 import AdminPanel from './components/AdminPanel';
 import ChatSoporte from './components/ChatSoporte';
+import GoogleMeetCalling from './components/GoogleMeetCalling';
 import { getColombiaDateTime, formatDateHuman, formatTime12h } from './utils/formato';
 import { 
   Building2, 
@@ -198,6 +199,7 @@ export default function App() {
 
       </div>
       <ChatSoporte currentUser={currentUser} />
+      <GoogleMeetCalling currentUser={currentUser} />
     </div>
   );
 }
