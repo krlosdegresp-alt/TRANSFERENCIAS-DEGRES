@@ -11,8 +11,6 @@ interface LoginProps {
 export default function Login({ onLoginSuccess }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<Role>('Cajera');
-  const [sede, setSede] = useState<Sede>('Guayabal');
   const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -52,9 +50,37 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       }
     }
 
-    // Identify user’s active role and sede based on choice or predefined structure
-    const finalRole = matched ? matched.role : role;
-    const finalSede = matched ? (matched.sede || 'Guayabal') : (role === 'Cajera' ? sede : undefined);
+    const emailPrefix = cleanMail.split('@')[0];
+    
+    // Identify user’s active role and sede based on email prefix or predefined structure
+    let finalRole: Role = 'Cajera';
+    let finalSede: Sede | undefined = 'Guayabal';
+
+    if (matched) {
+      finalRole = matched.role;
+      finalSede = matched.sede || 'Guayabal';
+    } else {
+      // Automatic deduction based on email address prefix
+      if (emailPrefix.includes('admin') || emailPrefix.includes('calidad') || emailPrefix.includes('gestion')) {
+        finalRole = 'Admin';
+        finalSede = undefined;
+      } else if (emailPrefix.includes('tesor') || emailPrefix.includes('marta') || emailPrefix.includes('pagos')) {
+        finalRole = 'Tesorera';
+        finalSede = undefined;
+      } else if (emailPrefix.includes('asesor') || emailPrefix.includes('vendedor') || emailPrefix.includes('comercial') || emailPrefix.includes('venta')) {
+        finalRole = 'Asesor';
+        finalSede = undefined;
+      } else {
+        finalRole = 'Cajera';
+        if (emailPrefix.includes('sabaneta')) {
+          finalSede = 'Sabaneta';
+        } else if (emailPrefix.includes('naranjal')) {
+          finalSede = 'Naranjal';
+        } else {
+          finalSede = 'Guayabal';
+        }
+      }
+    }
     
     // If a new user is logged in, use their submitted password for registration
     const logged = loginUser(cleanMail, finalRole, finalSede);
@@ -73,32 +99,31 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   };
 
   return (
-    <div id="login-container" className="min-h-screen bg-gradient-to-br from-[#0E1B46] via-[#162761] to-[#1E327A] flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Decorative corporate ambient background glow */}
-      <div className="absolute -top-[10%] -left-[10%] w-[350px] h-[350px] rounded-full bg-[#F47920]/15 blur-[80px] pointer-events-none"></div>
-      <div className="absolute -bottom-[10%] -right-[10%] w-[350px] h-[350px] rounded-full bg-[#1A2D7C]/30 blur-[80px] pointer-events-none"></div>
+    <div id="login-container" className="min-h-screen bg-gradient-to-br from-[#101b44] via-[#1A2D7C] to-[#0d1637] flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Soft corporate ambient background glow with lower intensity */}
+      <div className="absolute -top-[10%] -left-[10%] w-[320px] h-[320px] rounded-full bg-[#F47920]/10 blur-[90px] pointer-events-none"></div>
+      <div className="absolute -bottom-[10%] -right-[10%] w-[320px] h-[320px] rounded-full bg-[#1A2D7C]/20 blur-[90px] pointer-events-none"></div>
 
-      <div className="w-full max-w-md bg-[#1A2D7C] rounded-2xl shadow-2xl border-2 border-[#F47920] border-t-8 overflow-hidden p-8 md:p-10 flex flex-col items-center relative z-10 animate-in fade-in zoom-in-95 duration-300">
-        {/* Real Logo Component with lightMode={true} to transparently blend the black background */}
-        <div className="mb-6 flex flex-col items-center">
-          <DgDegresLogo lightMode={true} className="h-20 max-w-[240px] w-auto mb-3" />
-          <h1 className="text-xl font-bold font-sans text-white tracking-tight mt-2 text-center uppercase">
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200/80 border-t-4 border-t-[#F47920] overflow-hidden p-6 md:p-8 flex flex-col items-center relative z-10 animate-in fade-in zoom-in-95 duration-300">
+        <div className="mb-5 flex flex-col items-center">
+          <DgDegresLogo className="h-14 max-w-[220px] w-auto mb-3" />
+          <h1 className="text-lg font-bold font-sans text-slate-800 tracking-tight mt-1 text-center uppercase">
             Validación de Recaudos
           </h1>
-          <p className="text-slate-200 text-xs text-center mt-1">
+          <p className="text-slate-500 text-[11px] text-center mt-1">
             Ingresa tus credenciales para iniciar sesión en la plataforma
           </p>
         </div>
 
         {error && (
-          <div className="w-full mb-5 p-3 bg-rose-500/15 border-l-4 border-rose-500 text-rose-200 text-xs rounded font-medium">
+          <div className="w-full mb-5 p-3 bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs rounded font-medium">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="w-full space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider">Correo Electrónico</label>
+            <label className="block text-[11px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Correo Electrónico</label>
             <div className="relative">
               <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
               <input
@@ -111,13 +136,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                   setEmail(e.target.value);
                   setError('');
                 }}
-                className="w-full pl-11 pr-4 py-3 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#F47920]/20 focus:outline-none focus:border-[#F47920] bg-white text-slate-850 font-medium"
+                className="w-full pl-11 pr-4 py-3 text-sm border border-slate-250 rounded-xl focus:ring-2 focus:ring-[#1A2D7C]/15 focus:outline-none focus:border-[#1A2D7C] bg-slate-50 text-slate-850 placeholder-slate-400 font-medium transition-all"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider">Contraseña</label>
+            <label className="block text-[11px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Contraseña</label>
             <div className="relative">
               <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
               <input
@@ -126,41 +151,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-11 pr-4 py-3 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#F47920]/20 focus:outline-none focus:border-[#F47920] bg-white text-slate-850 font-medium"
+                className="w-full pl-11 pr-4 py-3 text-sm border border-slate-250 rounded-xl focus:ring-2 focus:ring-[#1A2D7C]/15 focus:outline-none focus:border-[#1A2D7C] bg-slate-50 text-slate-850 placeholder-slate-400 font-medium transition-all"
               />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3.5 pt-1">
-            <div>
-              <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider">Rol de Acceso</label>
-              <select
-                id="select-login-role"
-                value={role}
-                onChange={(e) => setRole(e.target.value as Role)}
-                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#F47920]/20 focus:outline-none focus:border-[#F47920] bg-white text-slate-850 font-medium cursor-pointer"
-              >
-                <option value="Cajera">Cajera / Sucursal</option>
-                <option value="Tesorera">Tesorera</option>
-                <option value="Admin">Admin General</option>
-                <option value="Asesor">Asesor Comercial</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider">Sede Física</label>
-              <select
-                id="select-login-sede"
-                value={sede}
-                disabled={role !== 'Cajera'}
-                onChange={(e) => setSede(e.target.value as Sede)}
-                className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#F47920]/20 focus:outline-none focus:border-[#F47920] bg-white disabled:opacity-50 disabled:bg-slate-100 disabled:cursor-not-allowed text-slate-850 font-medium cursor-pointer"
-              >
-                <option value="Guayabal">Guayabal (6519)</option>
-                <option value="Sabaneta">Sabaneta (0916)</option>
-                <option value="Naranjal">Naranjal (6807)</option>
-                <option value="Desconocida">Otra / Sin Sede</option>
-              </select>
             </div>
           </div>
 

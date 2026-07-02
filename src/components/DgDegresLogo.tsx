@@ -13,7 +13,7 @@ export default function DgDegresLogo({ className = "h-14", lightMode = false }: 
       src={logoUrl} 
       alt="DG DEGRES" 
       className={`${className} select-none object-contain ${
-        lightMode ? 'mix-blend-screen' : ''
+        lightMode ? 'mix-blend-screen' : 'invert mix-blend-multiply'
       }`}
       referrerPolicy="no-referrer"
     />
