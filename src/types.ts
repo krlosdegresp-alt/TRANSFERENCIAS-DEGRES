@@ -63,6 +63,7 @@ export interface UploadBatch {
   totalLeidos: number;
   totalImportados: number;
   totalDuplicados: number;
+  archivoUrl?: string;
 }
 
 export interface ChatMessage {

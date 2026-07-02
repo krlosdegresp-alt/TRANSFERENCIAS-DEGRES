@@ -1,5 +1,34 @@
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  writeBatch 
+} from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage } from './types';
 import { getColombiaDateTime } from './utils/formato';
+
+// Firebase configuration from firebase-applet-config.json
+const firebaseConfig = {
+  apiKey: "AIzaSyBlKnYrZy8nQj6KgP7qCW9k1F-QeCK2Oyo",
+  authDomain: "gen-lang-client-0899368462.firebaseapp.com",
+  projectId: "gen-lang-client-0899368462",
+  storageBucket: "gen-lang-client-0899368462.firebasestorage.app",
+  messagingSenderId: "303118479370",
+  appId: "1:303118479370:web:d2c45dbd5796070b172ff3"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 // Predefined accounts for login
 export const PREDEFINED_USERS: User[] = [
@@ -14,84 +43,16 @@ export const PREDEFINED_USERS: User[] = [
 
 export const PREDEFINED_ADVISORS: string[] = [];
 
-// Localstorage keys
+// Localstorage keys (kept for fallback and caching)
 const STORAGE_USER_KEY = 'transf_current_user';
 const STORAGE_USERS_KEY = 'transf_registered_users';
 const STORAGE_TRANS_KEY = 'transf_transactions';
 const STORAGE_LOGS_KEY = 'transf_audit_logs';
 const STORAGE_CIERRES_KEY = 'transf_cierres_caja';
 const STORAGE_BATCHES_KEY = 'transf_upload_batches';
+const STORAGE_CHAT_KEY = 'transferencias_chat_messages';
 
-
-export function getUsers(): User[] {
-  const data = localStorage.getItem(STORAGE_USERS_KEY);
-  if (!data) {
-    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(PREDEFINED_USERS));
-    return PREDEFINED_USERS;
-  }
-  try {
-    const parsed = JSON.parse(data) as User[];
-    // Check if we still have references to user emails with the old domain 'transferencias.com'
-    const hasOldDomain = parsed.some(user => user.email.toLowerCase().endsWith('@transferencias.com'));
-    const possessesNewAdmin = parsed.some(user => user.email.toLowerCase() === 'gestioncalidad@degrescolombia.com');
-    
-    if (hasOldDomain || !possessesNewAdmin) {
-      // Force refresh/migration to clean, predefined degrescolombia.com accounts
-      localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(PREDEFINED_USERS));
-      return PREDEFINED_USERS;
-    }
-
-    // Safety auto-migration check: If any predefined user has an undefined or empty password,
-    // restore their default key so login security will enforce credentials correctly.
-    let updatedNeeded = false;
-    const migrated = parsed.map(user => {
-      const predefinedDef = PREDEFINED_USERS.find(pu => pu.email.toLowerCase() === user.email.toLowerCase());
-      if (predefinedDef && !user.password) {
-        updatedNeeded = true;
-        return { ...user, password: predefinedDef.password };
-      }
-      return user;
-    });
-
-    if (updatedNeeded) {
-      localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(migrated));
-      return migrated;
-    }
-
-    return parsed;
-  } catch (e) {
-    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(PREDEFINED_USERS));
-    return PREDEFINED_USERS;
-  }
-}
-
-export function saveUsers(users: User[]) {
-  localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
-  notifyListeners();
-}
-
-// Event bus for real-time reactivity without page reload
-type Listener = () => void;
-const listeners = new Set<Listener>();
-
-export function subscribeToDatabase(callback: () => void) {
-  listeners.add(callback);
-  return () => {
-    listeners.delete(callback);
-  };
-}
-
-function notifyListeners() {
-  listeners.forEach(fn => {
-    try {
-      fn();
-    } catch (e) {
-      console.error('Error in listener update', e);
-    }
-  });
-}
-
-// Initial mockup data for transactions so that the dashboard doesn't start completely blank
+// Initial mockup data for transactions so that the dashboard doesn't start completely blank if no data is in cloud
 const INITIAL_TRANSACTIONS: Transaction[] = [
   {
     id: 'tx_6519_20260619_0915_543000_transferencia_qr',
@@ -168,7 +129,195 @@ const INITIAL_TRANSACTIONS: Transaction[] = [
   }
 ];
 
-// Auth Operations
+// Event bus for real-time reactivity without page reload
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+export function subscribeToDatabase(callback: () => void) {
+  listeners.add(callback);
+  return () => {
+    listeners.delete(callback);
+  };
+}
+
+function notifyListeners() {
+  listeners.forEach(fn => {
+    try {
+      fn();
+    } catch (e) {
+      console.error('Error in listener update', e);
+    }
+  });
+}
+
+// Helper to sync local state array updates to Firestore collections
+async function syncArrayToFirestore<T extends { id: string }>(
+  collectionName: string,
+  newItems: T[]
+) {
+  try {
+    const colRef = collection(db, collectionName);
+    const snapshot = await getDocs(colRef);
+    const existingIds = new Set(snapshot.docs.map(doc => doc.id));
+    const newIds = new Set(newItems.map(item => item.id));
+
+    // Delete items not present in the new set
+    for (const docId of existingIds) {
+      if (!newIds.has(docId)) {
+        await deleteDoc(doc(db, collectionName, docId));
+      }
+    }
+
+    // Write / Update current ones
+    for (const item of newItems) {
+      await setDoc(doc(db, collectionName, item.id), item);
+    }
+  } catch (error) {
+    console.error(`Error syncing collection ${collectionName} to Firestore:`, error);
+  }
+}
+
+// ----------------------------------------------------
+// REAL-TIME FIRESTORE SYNCHRONIZERS
+// ----------------------------------------------------
+let isInitialized = false;
+
+export function initializeRealtimeListeners() {
+  if (isInitialized) return;
+  isInitialized = true;
+
+  // 1. Users listener
+  onSnapshot(collection(db, 'users'), (snapshot) => {
+    let usersList: User[] = [];
+    snapshot.forEach(docSnap => {
+      usersList.push(docSnap.data() as User);
+    });
+
+    if (usersList.length === 0) {
+      // Seed with predefined users
+      PREDEFINED_USERS.forEach(u => {
+        setDoc(doc(db, 'users', u.id), u);
+      });
+      usersList = PREDEFINED_USERS;
+    }
+
+    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
+    notifyListeners();
+  });
+
+  // 2. Transactions listener
+  onSnapshot(collection(db, 'transactions'), (snapshot) => {
+    let txList: Transaction[] = [];
+    snapshot.forEach(docSnap => {
+      txList.push(docSnap.data() as Transaction);
+    });
+
+    if (txList.length === 0) {
+      // Seed with initial transactions
+      INITIAL_TRANSACTIONS.forEach(tx => {
+        setDoc(doc(db, 'transactions', tx.id), tx);
+      });
+      txList = INITIAL_TRANSACTIONS;
+    }
+
+    // Sort: latest dates first
+    txList.sort((a, b) => {
+      const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
+      const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
+      return dateTimeB.localeCompare(dateTimeA);
+    });
+
+    localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(txList));
+    notifyListeners();
+  });
+
+  // 3. Batches listener
+  onSnapshot(collection(db, 'batches'), (snapshot) => {
+    const batchList: UploadBatch[] = [];
+    snapshot.forEach(docSnap => {
+      batchList.push(docSnap.data() as UploadBatch);
+    });
+
+    batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
+
+    localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
+    notifyListeners();
+  });
+
+  // 4. Cierres listener
+  onSnapshot(collection(db, 'cierres'), (snapshot) => {
+    const cierresList: CierreCaja[] = [];
+    snapshot.forEach(docSnap => {
+      cierresList.push(docSnap.data() as CierreCaja);
+    });
+
+    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierresList));
+    notifyListeners();
+  });
+
+  // 5. Audit logs listener
+  onSnapshot(collection(db, 'logs'), (snapshot) => {
+    const logsList: AuditLog[] = [];
+    snapshot.forEach(docSnap => {
+      logsList.push(docSnap.data() as AuditLog);
+    });
+
+    logsList.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(logsList.slice(0, 500)));
+    notifyListeners();
+  });
+
+  // 6. Chat messages listener
+  onSnapshot(collection(db, 'chat'), (snapshot) => {
+    let chatList: ChatMessage[] = [];
+    snapshot.forEach(docSnap => {
+      chatList.push(docSnap.data() as ChatMessage);
+    });
+
+    if (chatList.length === 0) {
+      const initMsg: ChatMessage = {
+        id: 'init_1',
+        senderId: 'admin_test',
+        senderName: 'Soporte Administrativo (S.A.S)',
+        senderRole: 'Admin',
+        text: '¡Hola a todos! Este es el canal de chat y soporte para conciliar los cierres de caja y cuadres diarios.',
+        timestamp: getColombiaDateTime().dateTimeStr,
+        receiverId: null
+      };
+      setDoc(doc(db, 'chat', initMsg.id), initMsg);
+      chatList = [initMsg];
+    }
+
+    chatList.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(chatList));
+    notifyListeners();
+  });
+}
+
+// Start listeners immediately on import
+initializeRealtimeListeners();
+
+// ----------------------------------------------------
+// USERS OPERATIONS
+// ----------------------------------------------------
+export function getUsers(): User[] {
+  const data = localStorage.getItem(STORAGE_USERS_KEY);
+  if (!data) return PREDEFINED_USERS;
+  try {
+    return JSON.parse(data) as User[];
+  } catch (e) {
+    return PREDEFINED_USERS;
+  }
+}
+
+export function saveUsers(users: User[]) {
+  localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
+  notifyListeners();
+  syncArrayToFirestore('users', users);
+}
+
 export function getCurrentUser(): User | null {
   const data = localStorage.getItem(STORAGE_USER_KEY);
   if (!data) return null;
@@ -186,7 +335,6 @@ export function getCurrentUser(): User | null {
 
 export function loginUser(email: string, role?: Role, mockSede?: Sede): User {
   const users = getUsers();
-  // We match users STRICTLY by their normalized email address. This prevents matching different users with similar roles or branches.
   const existing = users.find(
     u => u.email.toLowerCase() === email.toLowerCase()
   );
@@ -200,7 +348,6 @@ export function loginUser(email: string, role?: Role, mockSede?: Sede): User {
     sede: mockSede || 'Guayabal'
   };
 
-  // Auto-register dynamically if they log in manual so they can be managed in Admin Pane
   if (!existing) {
     const updatedUsers = [...users, finalUser];
     saveUsers(updatedUsers);
@@ -219,29 +366,14 @@ export function logoutUser() {
   localStorage.removeItem(STORAGE_USER_KEY);
 }
 
-// Transaction Operations
+// ----------------------------------------------------
+// TRANSACTIONS OPERATIONS
+// ----------------------------------------------------
 export function getTransactions(): Transaction[] {
   const data = localStorage.getItem(STORAGE_TRANS_KEY);
-  if (!data) {
-    localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(INITIAL_TRANSACTIONS));
-    return INITIAL_TRANSACTIONS;
-  }
+  if (!data) return INITIAL_TRANSACTIONS;
   try {
-    const parsed = JSON.parse(data) as Transaction[];
-    const badAdvisors = ['Carlos Mendoza', 'Ana María Gómez', 'Sonia Restrepo', 'Juan David Trujillo', 'Diana Cardona', 'Andrés Felipe'];
-    let migrated = false;
-    const cleaned = parsed.map(tx => {
-      if (tx.asesor && badAdvisors.some(bad => tx.asesor!.trim().toLowerCase() === bad.trim().toLowerCase())) {
-        migrated = true;
-        return { ...tx, asesor: 'Mateo Osorio (Socio Comercial)' };
-      }
-      return tx;
-    });
-    if (migrated) {
-      localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
-      return cleaned;
-    }
-    return parsed;
+    return JSON.parse(data) as Transaction[];
   } catch (e) {
     return [];
   }
@@ -250,11 +382,30 @@ export function getTransactions(): Transaction[] {
 export function saveTransactions(txs: Transaction[]) {
   localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(txs));
   notifyListeners();
+
+  // Async bulk sync to Firestore
+  (async () => {
+    try {
+      const chunks = [];
+      for (let i = 0; i < txs.length; i += 500) {
+        chunks.push(txs.slice(i, i + 500));
+      }
+      for (const chunk of chunks) {
+        const bWrite = writeBatch(db);
+        chunk.forEach(tx => {
+          bWrite.set(doc(db, 'transactions', tx.id), tx);
+        });
+        await bWrite.commit();
+      }
+    } catch (e) {
+      console.error("Error bulk-syncing transactions to Firestore:", e);
+    }
+  })();
 }
 
-/**
- * Returns the recorded list of uploaded Excel/CSV files.
- */
+// ----------------------------------------------------
+// BATCHES OPERATIONS
+// ----------------------------------------------------
 export function getUploadBatches(): UploadBatch[] {
   const data = localStorage.getItem(STORAGE_BATCHES_KEY);
   if (!data) return [];
@@ -265,27 +416,21 @@ export function getUploadBatches(): UploadBatch[] {
   }
 }
 
-/**
- * Saves the recorded upload batches to persistent localStorage.
- */
 export function saveUploadBatches(batches: UploadBatch[]) {
   localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batches));
   notifyListeners();
+  syncArrayToFirestore('batches', batches);
 }
 
-/**
- * Uploads a list of parsed transactions and assigns them a stable batch trace.
- * Ignores duplicates automatically based on checking the llaveUnica.
- */
 export function uploadBankTransactions(
   newTxs: Transaction[], 
   uploaderName: string, 
-  fileName?: string
+  fileName?: string,
+  fileBlob?: File | null
 ): { imported: number; duplicates: number } {
   const current = getTransactions();
   const currentKeysSet = new Set(current.map(tx => tx.llaveUnica));
 
-  // Generate a cryptographically simple and unique batch ID
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   let imported = 0;
   let duplicates = 0;
@@ -297,45 +442,83 @@ export function uploadBankTransactions(
     } else {
       toAdd.push({
         ...tx,
-        batchId // associate this specific transaction with the batch
+        batchId
       });
       imported++;
     }
   });
 
+  const finalFileName = fileName || 'archivo_movimientos.xlsx';
+
+  // 1. Optimistic UI update
   if (toAdd.length > 0) {
-    const updated = [...toAdd, ...current]; // Put newest at the top
-    saveTransactions(updated);
+    const updated = [...toAdd, ...current];
+    localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(updated));
   }
 
-  if (newTxs.length > 0) {
-    // Save batch log metadata (even if zero are imported, we track the action)
-    const batches = getUploadBatches();
-    const newBatch: UploadBatch = {
-      id: batchId,
-      nombreArchivo: fileName || 'archivo_movimientos.xlsx',
-      fechaCarga: getColombiaDateTime().dateTimeStr,
-      usuario: uploaderName,
-      totalLeidos: newTxs.length,
-      totalImportados: imported,
-      totalDuplicados: duplicates
-    };
-    batches.unshift(newBatch);
-    saveUploadBatches(batches);
+  const batches = getUploadBatches();
+  const newBatch: UploadBatch = {
+    id: batchId,
+    nombreArchivo: finalFileName,
+    fechaCarga: getColombiaDateTime().dateTimeStr,
+    usuario: uploaderName,
+    totalLeidos: newTxs.length,
+    totalImportados: imported,
+    totalDuplicados: duplicates
+  };
+  batches.unshift(newBatch);
+  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batches));
+  notifyListeners();
 
-    addAuditLog(
-      uploaderName,
-      'Carga de Archivo',
-      `Subió '${newBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
-    );
-  }
+  // 2. Persistent upload & db save in the background
+  (async () => {
+    try {
+      let downloadUrl = '';
+      if (fileBlob) {
+        try {
+          const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
+          const snapshot = await uploadBytes(storageRef, fileBlob);
+          downloadUrl = await getDownloadURL(snapshot.ref);
+        } catch (stgErr) {
+          console.error("Firebase Storage upload error:", stgErr);
+        }
+      }
+
+      // Save transactions
+      if (toAdd.length > 0) {
+        const chunks = [];
+        for (let i = 0; i < toAdd.length; i += 500) {
+          chunks.push(toAdd.slice(i, i + 500));
+        }
+        for (const chunk of chunks) {
+          const bWrite = writeBatch(db);
+          chunk.forEach(tx => {
+            bWrite.set(doc(db, 'transactions', tx.id), tx);
+          });
+          await bWrite.commit();
+        }
+      }
+
+      // Save upload batch record with file URL
+      const persistentBatch: UploadBatch = {
+        ...newBatch,
+        archivoUrl: downloadUrl || undefined
+      };
+      await setDoc(doc(db, 'batches', batchId), persistentBatch);
+
+      await addAuditLog(
+        uploaderName,
+        'Carga de Archivo',
+        `Subió '${persistentBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
+      );
+    } catch (e) {
+      console.error("Error finalizing background excel upload:", e);
+    }
+  })();
 
   return { imported, duplicates };
 }
 
-/**
- * Reverts/deletes a loaded excel batch, removing all transactions imported through it.
- */
 export function revertUploadBatch(batchId: string, adminName: string): boolean {
   const batches = getUploadBatches();
   const batchIdx = batches.findIndex(b => b.id === batchId);
@@ -349,25 +532,50 @@ export function revertUploadBatch(batchId: string, adminName: string): boolean {
   const filteredTxs = currentTxs.filter(tx => tx.batchId !== batchId);
   const deletedCount = beforeCount - filteredTxs.length;
 
-  saveTransactions(filteredTxs);
-
-  // Remove the batch log too
+  // 1. Optimistic UI update
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(filteredTxs));
   batches.splice(batchIdx, 1);
-  saveUploadBatches(batches);
+  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batches));
+  notifyListeners();
 
-  addAuditLog(
-    adminName,
-    'Eliminación de Archivo Cargado',
-    `Eliminó el lote de carga del archivo '${batch.nombreArchivo}' (ID: ${batchId}). Se removieron ${deletedCount} transacciones de las sucursales.`
-  );
+  // 2. Async storage and firestore cleanup
+  (async () => {
+    try {
+      // Delete transactions from Firestore
+      const txsToDelete = currentTxs.filter(tx => tx.batchId === batchId);
+      for (const tx of txsToDelete) {
+        await deleteDoc(doc(db, 'transactions', tx.id));
+      }
+
+      // Delete file from storage
+      if (batch.archivoUrl) {
+        try {
+          const storageRef = ref(storage, `batches/${batchId}/${batch.nombreArchivo}`);
+          await deleteObject(storageRef);
+        } catch (stgErr) {
+          console.error("Firebase Storage deletion error:", stgErr);
+        }
+      }
+
+      // Delete batch record from Firestore
+      await deleteDoc(doc(db, 'batches', batchId));
+
+      await addAuditLog(
+        adminName,
+        'Eliminación de Archivo Cargado',
+        `Eliminó el lote de carga del archivo '${batch.nombreArchivo}' (ID: ${batchId}). Se removieron ${deletedCount} transacciones de las sucursales.`
+      );
+    } catch (e) {
+      console.error("Error reverting upload batch:", e);
+    }
+  })();
 
   return true;
 }
 
-
-/**
- * Identifies a transaction as completed (Cajera action).
- */
+// ----------------------------------------------------
+// VALIDA_TRANS OPERATIONS
+// ----------------------------------------------------
 export function identifyTransaction(
   id: string,
   asesor: string | null,
@@ -380,10 +588,9 @@ export function identifyTransaction(
   const idx = current.findIndex(tx => tx.id === id);
   if (idx === -1) return false;
 
-  // Verify it isn't already identified (or only let it pass if updating tags before completion)
   if (current[idx].identificada) return false;
 
-  current[idx] = {
+  const updatedTx = {
     ...current[idx],
     identificada: true,
     fechaIdentificacion: getColombiaDateTime().dateTimeStr,
@@ -394,20 +601,26 @@ export function identifyTransaction(
     justificacionIgnorado: tipoDocumento === 'Ignorado' ? (justificacionIgnorado || null) : null
   };
 
-  saveTransactions(current);
+  current[idx] = updatedTx;
+
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  notifyListeners();
+
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+    console.error("Error identifying transaction in Firestore:", err);
+  });
+
   addAuditLog(
     cajeraName,
     tipoDocumento === 'Ignorado' ? 'Pago Ignorado' : 'Validación de Pago',
     tipoDocumento === 'Ignorado'
-      ? `Ignoró transacción ${current[idx].llaveUnica.slice(0, 15)}... - Razón: ${justificacionIgnorado}`
-      : `Identificó transacción ${current[idx].llaveUnica.slice(0, 15)}... como ${tipoDocumento} - Asesor: ${asesor || 'No especificado'}`
+      ? `Ignoró transacción ${updatedTx.llaveUnica.slice(0, 15)}... - Razón: ${justificacionIgnorado}`
+      : `Identificó transacción ${updatedTx.llaveUnica.slice(0, 15)}... como ${tipoDocumento} - Asesor: ${asesor || 'No especificado'}`
   );
+
   return true;
 }
 
-/**
- * Reverts an identified transaction back to pending state (Admin action).
- */
 export function revertIdentification(id: string, adminName: string): boolean {
   const current = getTransactions();
   const idx = current.findIndex(tx => tx.id === id);
@@ -416,7 +629,7 @@ export function revertIdentification(id: string, adminName: string): boolean {
   const originalDoc = current[idx].tipoDocumento;
   const originalAsesor = current[idx].asesor;
 
-  current[idx] = {
+  const updatedTx = {
     ...current[idx],
     identificada: false,
     fechaIdentificacion: null,
@@ -426,83 +639,108 @@ export function revertIdentification(id: string, adminName: string): boolean {
     nroReciboCaja: null
   };
 
-  saveTransactions(current);
+  current[idx] = updatedTx;
+
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  notifyListeners();
+
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+    console.error("Error reverting identification in Firestore:", err);
+  });
+
   addAuditLog(
     adminName,
     'Reversión de Identificación',
     `Revirtió transacción ${id.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor})`
   );
+
   return true;
 }
 
-/**
- * Deletes or archives all transactions as historical (Admin monthly action).
- */
 export function executeMonthlyCleanup(adminName: string): { totalArchived: number } {
   const current = getTransactions();
   
-  // Set all current active transactions to historic: true
   const updated = current.map(tx => ({
     ...tx,
     esHistorico: true
   }));
 
-  saveTransactions(updated);
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(updated));
+  notifyListeners();
+
+  (async () => {
+    try {
+      const chunks = [];
+      for (let i = 0; i < updated.length; i += 500) {
+        chunks.push(updated.slice(i, i + 500));
+      }
+      for (const chunk of chunks) {
+        const bWrite = writeBatch(db);
+        chunk.forEach(tx => {
+          bWrite.set(doc(db, 'transactions', tx.id), tx);
+        });
+        await bWrite.commit();
+      }
+    } catch (e) {
+      console.error("Error in executeMonthlyCleanup background write:", e);
+    }
+  })();
+
   addAuditLog(
     adminName,
     'Limpieza Mensual',
-    `Ejecutó cierre del mes. Se archivaron ${updated.filter(t => !t.esHistorico).length} transacciones para consulta histórica.`
+    `Ejecutó cierre del mes. Se archivaron ${updated.length} transacciones para consulta histórica.`
   );
 
   return { totalArchived: updated.length };
 }
 
-// Audit Logs
+// ----------------------------------------------------
+// AUDIT LOGS OPERATIONS
+// ----------------------------------------------------
 export function getAuditLogs(): AuditLog[] {
   const data = localStorage.getItem(STORAGE_LOGS_KEY);
-  if (!data) {
-    const initial: AuditLog[] = [
-      {
-        id: 'log_1',
-        timestamp: getColombiaDateTime().dateTimeStr,
-        usuario: 'Sistema',
-        accion: 'Inicialización',
-        detalles: 'Base de datos de transferencias lista.'
-      }
-    ];
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(initial));
-    return initial;
+  if (!data) return [];
+  try {
+    return JSON.parse(data) as AuditLog[];
+  } catch (e) {
+    return [];
   }
-  return JSON.parse(data);
 }
 
 export function addAuditLog(usuario: string, accion: string, detalles: string) {
   const logs = getAuditLogs();
+  const id = 'log_' + Date.now() + Math.random().toString(36).substr(2, 4);
   const newLog: AuditLog = {
-    id: 'log_' + Date.now() + Math.random().toString(36).substr(2, 4),
+    id,
     timestamp: getColombiaDateTime().dateTimeStr,
     usuario,
     accion,
     detalles
   };
-  localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([newLog, ...logs].slice(0, 500))); // limit to last 500 logs
+
+  const updatedLogs = [newLog, ...logs].slice(0, 500);
+  localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(updatedLogs));
+  notifyListeners();
+
+  setDoc(doc(db, 'logs', id), newLog).catch(e => {
+    console.error("Error writing audit log to Firestore:", e);
+  });
 }
 
-/**
- * Returns a connection health summary details for reference or diagnostics
- */
 export function checkFirebaseStatus(): { status: string; persistence: string } {
   return {
-    status: 'Real-Time Synchronized (Local-Mirror Mode)',
-    persistence: 'LocalStorage Persisted + Active Frame Events'
+    status: 'Conectado a Firebase Firestore (Tiempo Real)',
+    persistence: 'Doble Persistencia (Firestore + LocalStorage)'
   };
 }
 
+// ----------------------------------------------------
+// CIERRES CAJA OPERATIONS
+// ----------------------------------------------------
 export function getCierresCaja(): CierreCaja[] {
   const data = localStorage.getItem(STORAGE_CIERRES_KEY);
-  if (!data) {
-    return [];
-  }
+  if (!data) return [];
   try {
     return JSON.parse(data) as CierreCaja[];
   } catch (e) {
@@ -513,13 +751,13 @@ export function getCierresCaja(): CierreCaja[] {
 export function saveCierresCaja(cierres: CierreCaja[]) {
   localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
   notifyListeners();
+  syncArrayToFirestore('cierres', cierres);
 }
 
 export function registrarCierreCaja(fecha: string, sede: Sede, nombreCajera: string, totalDeclarado: number): CierreCaja {
   const cierres = getCierresCaja();
   const id = `cierre_${sede}_${fecha}`;
   
-  // Find if a closure already exists for this Sede & Date
   const existingIdx = cierres.findIndex(c => c.id === id);
   
   const nuevoCierre: CierreCaja = {
@@ -537,12 +775,19 @@ export function registrarCierreCaja(fecha: string, sede: Sede, nombreCajera: str
     cierres.push(nuevoCierre);
   }
   
-  saveCierresCaja(cierres);
+  localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+  notifyListeners();
+
+  setDoc(doc(db, 'cierres', id), nuevoCierre).catch(e => {
+    console.error("Error writing closure to Firestore:", e);
+  });
+
   addAuditLog(
     nombreCajera, 
     'Cierre de Caja Guardado', 
     `Sede: ${sede}, Fecha: ${fecha}, Declarado: $${totalDeclarado.toLocaleString('es-CO')}`
   );
+
   return nuevoCierre;
 }
 
@@ -551,12 +796,22 @@ export function solicitarDesbloqueoCierre(fecha: string, sede: Sede, motivo: str
   const id = `cierre_${sede}_${fecha}`;
   const idx = cierres.findIndex(c => c.id === id);
   if (idx >= 0) {
-    cierres[idx] = {
+    const updatedCierre = {
       ...cierres[idx],
       solicitaDesbloqueo: true,
       motivoDesbloqueo: motivo
     };
-    saveCierresCaja(cierres);
+    cierres[idx] = updatedCierre;
+    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+    notifyListeners();
+
+    updateDoc(doc(db, 'cierres', id), {
+      solicitaDesbloqueo: true,
+      motivoDesbloqueo: motivo
+    }).catch(e => {
+      console.error("Error requesting unlock in Firestore:", e);
+    });
+
     addAuditLog(usuario, 'Solicitud Desbloqueo Cierre', `Sede: ${sede}, Fecha: ${fecha}, Motivo: ${motivo}`);
     return true;
   }
@@ -568,7 +823,13 @@ export function aprobarDesbloqueoCierre(fecha: string, sede: Sede, adminUser: st
   const id = `cierre_${sede}_${fecha}`;
   const filtered = cierres.filter(c => c.id !== id);
   if (filtered.length !== cierres.length) {
-    saveCierresCaja(filtered);
+    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(filtered));
+    notifyListeners();
+
+    deleteDoc(doc(db, 'cierres', id)).catch(e => {
+      console.error("Error deleting closure in Firestore:", e);
+    });
+
     addAuditLog(adminUser, 'Desbloqueo Cierre Aprobado', `Se desbloqueó y eliminó el cierre de caja de la Sede: ${sede} para la Fecha: ${fecha}`);
     return true;
   }
@@ -580,12 +841,22 @@ export function rechazarDesbloqueoCierre(fecha: string, sede: Sede, adminUser: s
   const id = `cierre_${sede}_${fecha}`;
   const idx = cierres.findIndex(c => c.id === id);
   if (idx >= 0) {
-    cierres[idx] = {
+    const updatedCierre = {
       ...cierres[idx],
       solicitaDesbloqueo: false,
       motivoDesbloqueo: null
     };
-    saveCierresCaja(cierres);
+    cierres[idx] = updatedCierre;
+    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+    notifyListeners();
+
+    updateDoc(doc(db, 'cierres', id), {
+      solicitaDesbloqueo: false,
+      motivoDesbloqueo: null
+    }).catch(e => {
+      console.error("Error rejecting unlock in Firestore:", e);
+    });
+
     addAuditLog(adminUser, 'Desbloqueo Cierre Rechazado', `Se rechazó la solicitud de desbloqueo del cierre de caja de la Sede: ${sede} para la Fecha: ${fecha}`);
     return true;
   }
@@ -596,21 +867,44 @@ export function clearAllDatabase(usuario: string) {
   localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify([]));
   localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify([]));
   localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify([]));
-  addAuditLog(usuario, 'Limpieza Total', 'Se borraron todas las transacciones, exceles subidos e historial de cierres de caja del sistema.');
   notifyListeners();
+
+  (async () => {
+    try {
+      const collectionsToClear = ['transactions', 'batches', 'cierres', 'logs', 'chat'];
+      for (const colName of collectionsToClear) {
+        const colRef = collection(db, colName);
+        const snapshot = await getDocs(colRef);
+        const docs = snapshot.docs;
+        const chunks = [];
+        for (let i = 0; i < docs.length; i += 500) {
+          chunks.push(docs.slice(i, i + 500));
+        }
+        for (const chunk of chunks) {
+          const bWrite = writeBatch(db);
+          chunk.forEach(d => {
+            bWrite.delete(d.ref);
+          });
+          await bWrite.commit();
+        }
+      }
+    } catch (e) {
+      console.error("Error wiping Firestore database:", e);
+    }
+  })();
+
+  addAuditLog(usuario, 'Limpieza Total', 'Se borraron todas las transacciones, exceles subidos e historial de cierres de caja del sistema.');
 }
 
 export function getAdvisors(): string[] {
   const list = new Set<string>();
 
-  // Add any registered users whose role is 'Asesor'
   getUsers().forEach(user => {
     if (user.role === 'Asesor' && user.nombre) {
       list.add(user.nombre.trim());
     }
   });
 
-  // Keep any advisor recorded on transactions
   getTransactions().forEach(tx => {
     if (tx.identificada && tx.asesor) {
       list.add(tx.asesor.trim());
@@ -620,32 +914,24 @@ export function getAdvisors(): string[] {
   return Array.from(list);
 }
 
-const STORAGE_CHAT_KEY = 'transferencias_chat_messages';
-
+// ----------------------------------------------------
+// CHAT OPERATIONS
+// ----------------------------------------------------
 export function getChatMessages(): ChatMessage[] {
   const data = localStorage.getItem(STORAGE_CHAT_KEY);
-  if (!data) {
-    const initial: ChatMessage[] = [
-      {
-        id: 'init_1',
-        senderId: 'admin_test',
-        senderName: 'Soporte Administrativo (S.A.S)',
-        senderRole: 'Admin',
-        text: '¡Hola a todos! Este es el canal de chat y soporte para conciliar los cierres de caja y cuadres diarios.',
-        timestamp: getColombiaDateTime().dateTimeStr,
-        receiverId: null
-      }
-    ];
-    localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(initial));
-    return initial;
+  if (!data) return [];
+  try {
+    return JSON.parse(data) as ChatMessage[];
+  } catch (e) {
+    return [];
   }
-  return JSON.parse(data);
 }
 
 export function sendChatMessage(senderId: string, senderName: string, senderRole: Role, text: string, receiverId?: string | null): ChatMessage {
   const messages = getChatMessages();
+  const id = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
   const newMessage: ChatMessage = {
-    id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    id,
     senderId,
     senderName,
     senderRole,
@@ -656,6 +942,11 @@ export function sendChatMessage(senderId: string, senderName: string, senderRole
   messages.push(newMessage);
   localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(messages));
   notifyListeners();
+
+  setDoc(doc(db, 'chat', id), newMessage).catch(e => {
+    console.error("Error sending chat message to Firestore:", e);
+  });
+
   return newMessage;
 }
 
@@ -665,9 +956,12 @@ export function deleteChatMessage(id: string): boolean {
   if (filtered.length !== messages.length) {
     localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(filtered));
     notifyListeners();
+
+    deleteDoc(doc(db, 'chat', id)).catch(e => {
+      console.error("Error deleting chat message in Firestore:", e);
+    });
+
     return true;
   }
   return false;
 }
-
-

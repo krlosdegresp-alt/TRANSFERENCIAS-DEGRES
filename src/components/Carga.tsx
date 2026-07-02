@@ -196,8 +196,13 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
   const handleCommitQueue = () => {
     if (parsedQueue.length === 0) return;
 
-    // Trigger upload with duplication filter, passing real filename
-    const res = uploadBankTransactions(parsedQueue, currentUser.nombre, selectedFile?.name || 'archivo_movimientos.xlsx');
+    // Trigger upload with duplication filter, passing real filename and file blob for Firebase Storage
+    const res = uploadBankTransactions(
+      parsedQueue, 
+      currentUser.nombre, 
+      selectedFile?.name || 'archivo_movimientos.xlsx',
+      selectedFile
+    );
     setUploadSummary(res);
     setParsedQueue([]);
     setSelectedFile(null);
@@ -535,9 +540,21 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
                       <td className="p-4 font-bold text-slate-850 min-w-[220px] break-all">
                         <div className="flex items-center gap-2">
                           <FileSpreadsheet className="h-4.5 w-4.5 text-emerald-600 flex-shrink-0" />
-                          <span title={batch.nombreArchivo} className="whitespace-normal">
-                            {batch.nombreArchivo}
-                          </span>
+                          {batch.archivoUrl ? (
+                            <a 
+                              href={batch.archivoUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="text-[#1A2D7C] hover:underline font-bold whitespace-normal inline-flex items-center gap-1 cursor-pointer"
+                              title="Descargar archivo original de Firebase Storage"
+                            >
+                              {batch.nombreArchivo}
+                            </a>
+                          ) : (
+                            <span title={batch.nombreArchivo} className="whitespace-normal">
+                              {batch.nombreArchivo}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="p-4 font-mono text-slate-500 font-medium">
