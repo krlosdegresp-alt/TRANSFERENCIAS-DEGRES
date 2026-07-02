@@ -290,12 +290,12 @@ export function saveUsers(users: User[]) {
 }
 
 export function getCurrentUser(): User | null {
-  const data = localStorage.getItem(STORAGE_USER_KEY);
+  const data = sessionStorage.getItem(STORAGE_USER_KEY);
   if (!data) return null;
   try {
     const user = JSON.parse(data) as User;
     if (user && user.email && user.email.toLowerCase().endsWith('@transferencias.com')) {
-      localStorage.removeItem(STORAGE_USER_KEY);
+      sessionStorage.removeItem(STORAGE_USER_KEY);
       return null;
     }
     return user;
@@ -324,7 +324,7 @@ export function loginUser(email: string, role?: Role, mockSede?: Sede): User {
     saveUsers(updatedUsers);
   }
 
-  localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(finalUser));
+  sessionStorage.setItem(STORAGE_USER_KEY, JSON.stringify(finalUser));
   addAuditLog(finalUser.nombre, 'Inicio de Sesión', `Usuario con rol ${finalUser.role} ingresó al aplicativo.`);
   return finalUser;
 }
@@ -334,7 +334,7 @@ export function logoutUser() {
   if (currentUser) {
     addAuditLog(currentUser.nombre, 'Cierre de Sesión', `Usuario cerró sesión manualmente.`);
   }
-  localStorage.removeItem(STORAGE_USER_KEY);
+  sessionStorage.removeItem(STORAGE_USER_KEY);
 }
 
 // ----------------------------------------------------

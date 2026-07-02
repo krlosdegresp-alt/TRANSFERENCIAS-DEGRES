@@ -265,9 +265,9 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     setUserList(updated);
     saveUsers(updated);
 
-    // Sync current session localstorage representations
+    // Sync current session sessionStorage representations
     const updatedUserObj = { ...currentUser, password: adminNewPsw.trim() };
-    localStorage.setItem('transf_current_user', JSON.stringify(updatedUserObj));
+    sessionStorage.setItem('transf_current_user', JSON.stringify(updatedUserObj));
 
     addAuditLog(currentUser.nombre, 'Actualización de Contraseña Admin', `El Administrador actualizó su propia contraseña tras autenticación de doble factor (2FA).`);
     setAdminPswSuccess('¡Contraseña de Administrador actualizada con éxito!');
