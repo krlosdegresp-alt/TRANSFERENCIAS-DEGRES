@@ -27,7 +27,7 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = getFirestore(app, "ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212");
 export const storage = getStorage(app);
 
 // Predefined accounts for login
@@ -276,7 +276,8 @@ export function getUsers(): User[] {
   const data = localStorage.getItem(STORAGE_USERS_KEY);
   if (!data) return PREDEFINED_USERS;
   try {
-    return JSON.parse(data) as User[];
+    const list = JSON.parse(data) as User[];
+    return list.length === 0 ? PREDEFINED_USERS : list;
   } catch (e) {
     return PREDEFINED_USERS;
   }
