@@ -193,14 +193,6 @@ export function initializeRealtimeListeners() {
       usersList.push(docSnap.data() as User);
     });
 
-    if (usersList.length === 0) {
-      // Seed with predefined users
-      PREDEFINED_USERS.forEach(u => {
-        setDoc(doc(db, 'users', u.id), u);
-      });
-      usersList = PREDEFINED_USERS;
-    }
-
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
     notifyListeners();
   });
@@ -211,14 +203,6 @@ export function initializeRealtimeListeners() {
     snapshot.forEach(docSnap => {
       txList.push(docSnap.data() as Transaction);
     });
-
-    if (txList.length === 0) {
-      // Seed with initial transactions
-      INITIAL_TRANSACTIONS.forEach(tx => {
-        setDoc(doc(db, 'transactions', tx.id), tx);
-      });
-      txList = INITIAL_TRANSACTIONS;
-    }
 
     // Sort: latest dates first
     txList.sort((a, b) => {
@@ -274,20 +258,6 @@ export function initializeRealtimeListeners() {
     snapshot.forEach(docSnap => {
       chatList.push(docSnap.data() as ChatMessage);
     });
-
-    if (chatList.length === 0) {
-      const initMsg: ChatMessage = {
-        id: 'init_1',
-        senderId: 'admin_test',
-        senderName: 'Soporte Administrativo (S.A.S)',
-        senderRole: 'Admin',
-        text: '¡Hola a todos! Este es el canal de chat y soporte para conciliar los cierres de caja y cuadres diarios.',
-        timestamp: getColombiaDateTime().dateTimeStr,
-        receiverId: null
-      };
-      setDoc(doc(db, 'chat', initMsg.id), initMsg);
-      chatList = [initMsg];
-    }
 
     chatList.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
