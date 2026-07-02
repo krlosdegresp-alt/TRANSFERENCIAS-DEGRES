@@ -38,7 +38,8 @@ export const PREDEFINED_USERS: User[] = [
   { id: 'u3', email: 'cajera.guayabal@degrescolombia.com', nombre: 'Lucía Pérez (Caja Guayabal)', role: 'Cajera', sede: 'Guayabal', password: 'Sede123' },
   { id: 'u4', email: 'cajera.sabaneta@degrescolombia.com', nombre: 'Sofía Montoya (Caja Sabaneta)', role: 'Cajera', sede: 'Sabaneta', password: 'Sede123' },
   { id: 'u5', email: 'cajera.naranjal@degrescolombia.com', nombre: 'Claudia Giraldo (Caja Naranjal)', role: 'Cajera', sede: 'Naranjal', password: 'Sede123' },
-  { id: 'u6', email: 'asesor@degrescolombia.com', nombre: 'Mateo Osorio (Socio Comercial)', role: 'Asesor', password: 'Asesor123' }
+  { id: 'u6', email: 'asesor@degrescolombia.com', nombre: 'Mateo Osorio (Socio Comercial)', role: 'Asesor', password: 'Asesor123' },
+  { id: 'u7', email: 'analistati@degrescolombia.com', nombre: 'Carlos Ti', role: 'Admin', password: 'Admin123' }
 ];
 
 export const PREDEFINED_ADVISORS: string[] = [];
@@ -268,6 +269,22 @@ export function initializeRealtimeListeners() {
 
 // Start listeners immediately on import
 initializeRealtimeListeners();
+
+// Ensure Carlos Ti and other predefined users are in Firestore if not already present
+async function ensurePredefinedUsersInFirestore() {
+  try {
+    for (const u of PREDEFINED_USERS) {
+      const userDocRef = doc(db, 'users', u.id);
+      const docSnap = await getDoc(userDocRef);
+      if (!docSnap.exists()) {
+        await setDoc(userDocRef, u);
+      }
+    }
+  } catch (error) {
+    console.error("Error ensuring predefined users in Firestore:", error);
+  }
+}
+ensurePredefinedUsersInFirestore();
 
 // ----------------------------------------------------
 // USERS OPERATIONS
