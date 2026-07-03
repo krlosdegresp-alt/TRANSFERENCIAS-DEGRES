@@ -315,10 +315,10 @@ export function getUsers(): User[] {
   }
 }
 
-export function saveUsers(users: User[]) {
+export async function saveUsers(users: User[]) {
   localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
   notifyListeners();
-  syncArrayToFirestore('users', users);
+  await syncArrayToFirestore('users', users);
 }
 
 export function getCurrentUser(): User | null {
@@ -639,7 +639,11 @@ export function revertIdentification(id: string, adminName: string): boolean {
     usuarioIdentificacion: null,
     asesor: null,
     tipoDocumento: null,
-    nroReciboCaja: null
+    nroReciboCaja: null,
+    solicitudCambio: null,
+    solicitudMotivo: null,
+    solicitudUsuario: null,
+    solicitudFecha: null
   };
 
   current[idx] = updatedTx;
@@ -656,6 +660,102 @@ export function revertIdentification(id: string, adminName: string): boolean {
     'Reversión de Identificación',
     `Revirtió transacción ${id.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor})`
   );
+
+  return true;
+}
+
+export function requestTransactionChange(id: string, user: string, reason: string): boolean {
+  const current = getTransactions();
+  const idx = current.findIndex(tx => tx.id === id);
+  if (idx === -1) return false;
+
+  const updatedTx = {
+    ...current[idx],
+    solicitudCambio: 'pendiente' as const,
+    solicitudMotivo: reason,
+    solicitudUsuario: user,
+    solicitudFecha: getColombiaDateTime().dateTimeStr
+  };
+
+  current[idx] = updatedTx;
+
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  notifyListeners();
+
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+    console.error("Error requesting transaction change in Firestore:", err);
+  });
+
+  addAuditLog(
+    user,
+    'Solicitud de Cambio',
+    `Solicitó cambio/liberación para la transacción ${id.slice(-8).toUpperCase()} - Motivo: ${reason}`
+  );
+
+  return true;
+}
+
+export function resolveTransactionChange(
+  id: string,
+  resolution: 'liberar' | 'corregir',
+  adminName: string,
+  fields?: {
+    asesor?: string | null;
+    tipoDocumento?: 'Recibo' | 'Remisión' | 'Ignorado' | null;
+    justificacionIgnorado?: string | null;
+  }
+): boolean {
+  const current = getTransactions();
+  const idx = current.findIndex(tx => tx.id === id);
+  if (idx === -1) return false;
+
+  let updatedTx = { ...current[idx] };
+
+  if (resolution === 'liberar') {
+    updatedTx = {
+      ...updatedTx,
+      identificada: false,
+      fechaIdentificacion: null,
+      usuarioIdentificacion: null,
+      asesor: null,
+      tipoDocumento: null,
+      nroReciboCaja: null,
+      justificacionIgnorado: null,
+      solicitudCambio: 'liberado' as const,
+      solicitudFecha: getColombiaDateTime().dateTimeStr
+    };
+    addAuditLog(
+      adminName,
+      'Liberación de Transacción',
+      `Aprobó liberación de transacción ${id.slice(-8).toUpperCase()} solicitada por ${updatedTx.solicitudUsuario}`
+    );
+  } else {
+    updatedTx = {
+      ...updatedTx,
+      identificada: true,
+      fechaIdentificacion: getColombiaDateTime().dateTimeStr,
+      usuarioIdentificacion: `${updatedTx.usuarioIdentificacion || ''} (Modificado por Admin ${adminName})`,
+      asesor: fields?.tipoDocumento === 'Ignorado' ? null : (fields?.asesor || updatedTx.asesor),
+      tipoDocumento: fields?.tipoDocumento || updatedTx.tipoDocumento,
+      justificacionIgnorado: fields?.tipoDocumento === 'Ignorado' ? (fields?.justificacionIgnorado || updatedTx.justificacionIgnorado) : null,
+      solicitudCambio: 'corregido' as const,
+      solicitudFecha: getColombiaDateTime().dateTimeStr
+    };
+    addAuditLog(
+      adminName,
+      'Corrección de Transacción',
+      `Corrigió directamente la transacción ${id.slice(-8).toUpperCase()} - Nuevo Doc: ${fields?.tipoDocumento}, Asesor: ${fields?.asesor || 'N/A'}`
+    );
+  }
+
+  current[idx] = updatedTx;
+
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  notifyListeners();
+
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+    console.error("Error resolving transaction change in Firestore:", err);
+  });
 
   return true;
 }
@@ -993,10 +1093,11 @@ export async function startVideoCall(
   senderName: string,
   senderRole: Role,
   receiverId: string,
-  receiverName: string
+  receiverName: string,
+  customMeetLink?: string
 ): Promise<VideoCall> {
   const id = `call_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-  const meetLink = generateGoogleMeetLink();
+  const meetLink = customMeetLink || generateGoogleMeetLink();
   const newCall: VideoCall = {
     id,
     senderId,

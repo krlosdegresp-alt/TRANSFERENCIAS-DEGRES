@@ -119,11 +119,12 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
   const [adminNewPswConfirm, setAdminNewPswConfirm] = useState('');
   const [adminPswError, setAdminPswError] = useState('');
   const [adminPswSuccess, setAdminPswSuccess] = useState('');
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   // List of identified transactions that could be reverted
   const identifiedTxs = transactions.filter(tx => tx.identificada && !tx.esHistorico);
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNombre || !newEmail) {
       triggerAlert('Campos Incompletos', 'Por favor completa todos los campos.', 'error');
@@ -146,18 +147,27 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     };
 
     const updated = [newUser, ...userList];
-    setUserList(updated);
-    saveUsers(updated);
-    addAuditLog(currentUser.nombre, 'Creación de Usuario', `Creado usuario ${newNombre} con rol ${newRole}`);
-    
-    // reset form
-    setNewNombre('');
-    setNewEmail('');
-    setNewPassword('');
-    setShowAddForm(false);
+    setIsSavingUser(true);
+    try {
+      setUserList(updated);
+      await saveUsers(updated);
+      addAuditLog(currentUser.nombre, 'Creación de Usuario', `Creado usuario ${newNombre} con rol ${newRole}`);
+      triggerAlert('Colaborador Creado', `¡El colaborador "${newNombre}" ha sido guardado exitosamente en la base de datos!`, 'success');
+      
+      // reset form
+      setNewNombre('');
+      setNewEmail('');
+      setNewPassword('');
+      setShowAddForm(false);
+    } catch (error) {
+      console.error(error);
+      triggerAlert('Error de Guardado', 'Hubo un inconveniente al guardar el colaborador en la base de datos.', 'error');
+    } finally {
+      setIsSavingUser(false);
+    }
   };
 
-  const handleUpdateUserRole = (id: string, role: Role, sede?: Sede) => {
+  const handleUpdateUserRole = async (id: string, role: Role, sede?: Sede) => {
     const updated = userList.map(u => {
       if (u.id === id) {
         return {
@@ -168,11 +178,20 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       }
       return u;
     });
-    setUserList(updated);
-    saveUsers(updated);
-    
-    const usr = userList.find(u => u.id === id);
-    addAuditLog(currentUser.nombre, 'Ajuste de Rol', `Modificado rol de ${usr?.nombre} a ${role}`);
+
+    setIsSavingUser(true);
+    try {
+      setUserList(updated);
+      await saveUsers(updated);
+      const usr = userList.find(u => u.id === id);
+      addAuditLog(currentUser.nombre, 'Ajuste de Rol', `Modificado rol de ${usr?.nombre} a ${role}`);
+      triggerAlert('Rol Actualizado', 'El rol del colaborador se actualizó y guardó exitosamente.', 'success');
+    } catch (err) {
+      console.error(err);
+      triggerAlert('Error', 'No se pudo guardar el cambio de rol.', 'error');
+    } finally {
+      setIsSavingUser(false);
+    }
   };
 
   const handleStartEdit = (usr: User) => {
@@ -184,7 +203,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     setEditPassword(usr.password || '');
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editNombre || !editEmail) {
       triggerAlert('Campos Incompletos', 'Por favor completa todos los campos.', 'error');
       return;
@@ -210,10 +229,19 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       return u;
     });
 
-    setUserList(updated);
-    saveUsers(updated);
-    addAuditLog(currentUser.nombre, 'Edición de Colaborador', `Modificados datos del colaborador ${editNombre} (${emailLower})`);
-    setEditingUserId(null);
+    setIsSavingUser(true);
+    try {
+      setUserList(updated);
+      await saveUsers(updated);
+      addAuditLog(currentUser.nombre, 'Edición de Colaborador', `Modificados datos del colaborador ${editNombre} (${emailLower})`);
+      setEditingUserId(null);
+      triggerAlert('Cambios Guardados', 'Los cambios en los datos del colaborador han sido guardados exitosamente.', 'success');
+    } catch (err) {
+      console.error(err);
+      triggerAlert('Error de Guardado', 'No se pudieron guardar las modificaciones.', 'error');
+    } finally {
+      setIsSavingUser(false);
+    }
   };
 
   // 2FA Admin Password Change Operations
@@ -290,12 +318,20 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     triggerConfirm(
       'Confirmar Eliminación',
       `¿Estás seguro de que deseas eliminar permanentemente al colaborador ${usr.nombre}?`,
-      () => {
+      async () => {
         const updated = userList.filter(u => u.id !== id);
-        setUserList(updated);
-        saveUsers(updated);
-        addAuditLog(currentUser.nombre, 'Eliminación de Colaborador', `Eliminado permanentemente el colaborador ${usr.nombre}`);
-        triggerAlert('Colaborador Eliminado', `¡El colaborador "${usr.nombre}" ha sido eliminado exitosamente del sistema!`, 'success');
+        setIsSavingUser(true);
+        try {
+          setUserList(updated);
+          await saveUsers(updated);
+          addAuditLog(currentUser.nombre, 'Eliminación de Colaborador', `Eliminado permanentemente el colaborador ${usr.nombre}`);
+          triggerAlert('Colaborador Eliminado', `¡El colaborador "${usr.nombre}" ha sido eliminado exitosamente del sistema!`, 'success');
+        } catch (error) {
+          console.error(error);
+          triggerAlert('Error', 'No se pudo guardar la eliminación en la base de datos.', 'error');
+        } finally {
+          setIsSavingUser(false);
+        }
       },
       'danger'
     );
@@ -317,21 +353,29 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     triggerConfirm(
       newStatus ? 'Bloquear Colaborador' : 'Habilitar Colaborador',
       confirmMessage,
-      () => {
+      async () => {
         const updated = userList.map(u => {
           if (u.id === id) {
             return { ...u, isBlocked: newStatus };
           }
           return u;
         });
-        setUserList(updated);
-        saveUsers(updated);
-        addAuditLog(currentUser.nombre, newStatus ? 'Deshabilitación' : 'Habilitación', `${newStatus ? 'Deshabilitado' : 'Habilitado'} colaborador ${usr.nombre}`);
-        triggerAlert(
-          newStatus ? 'Colaborador Bloqueado' : 'Colaborador Habilitado',
-          `¡El colaborador "${usr.nombre}" ha sido ${newStatus ? 'bloqueado' : 'habilitado'} exitosamente!`,
-          'success'
-        );
+        setIsSavingUser(true);
+        try {
+          setUserList(updated);
+          await saveUsers(updated);
+          addAuditLog(currentUser.nombre, newStatus ? 'Deshabilitación' : 'Habilitación', `${newStatus ? 'Deshabilitado' : 'Habilitado'} colaborador ${usr.nombre}`);
+          triggerAlert(
+            newStatus ? 'Colaborador Bloqueado' : 'Colaborador Habilitado',
+            `¡El colaborador "${usr.nombre}" ha sido ${newStatus ? 'bloqueado' : 'habilitado'} exitosamente!`,
+            'success'
+          );
+        } catch (error) {
+          console.error(error);
+          triggerAlert('Error', 'No se pudo guardar el cambio de estado.', 'error');
+        } finally {
+          setIsSavingUser(false);
+        }
       },
       newStatus ? 'warning' : 'success'
     );
@@ -612,9 +656,20 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       {/* 1. GESTION DE ROLES */}
       {activeSubTab === 'roles' && (
         <div id="subview-roles" className="space-y-6">
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="font-bold text-slate-900 text-sm">Auxiliares y Permisos Activos</h3>
+              <div className="flex items-center gap-3 flex-wrap">
+                <h3 className="font-bold text-slate-900 text-sm">Auxiliares y Permisos Activos</h3>
+                {isSavingUser && (
+                  <span className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full animate-pulse shadow-sm">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+                    </span>
+                    Guardando Cambios en la Nube...
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500 mt-1">
                 La tabla muestra los perfiles autorizados que tienen acceso al sistema con roles delimitados.
               </p>

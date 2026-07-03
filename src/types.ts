@@ -34,6 +34,10 @@ export interface Transaction {
   comprobante?: string;
   esQR?: boolean; // Tagged as QR payment
   batchId?: string | null; // Associates transaction with a specific excel upload batch
+  solicitudCambio?: 'pendiente' | 'liberado' | 'corregido' | null;
+  solicitudMotivo?: string | null;
+  solicitudUsuario?: string | null;
+  solicitudFecha?: string | null;
 }
 
 export interface AuditLog {

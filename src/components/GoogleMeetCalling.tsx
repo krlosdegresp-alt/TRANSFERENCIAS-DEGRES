@@ -4,6 +4,7 @@ import {
   startVideoCall, 
   updateVideoCallStatus, 
   subscribeToDatabase, 
+  getUsers,
   PREDEFINED_USERS 
 } from '../firebase';
 import { VideoCall, User } from '../types';
@@ -135,10 +136,13 @@ function playOutgoingDialSound(): () => void {
 
 export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProps) {
   const [videoCalls, setVideoCalls] = useState<VideoCall[]>(() => getVideoCalls());
+  const [users, setUsers] = useState<User[]>(() => getUsers());
   const [showDialer, setShowDialer] = useState(false);
   const [dialingReceiverId, setDialingReceiverId] = useState('');
   const [isCallingAPI, setIsCallingAPI] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [customMeetLink, setCustomMeetLink] = useState('');
+  const [meetLinkError, setMeetLinkError] = useState('');
   
   // Mounted timestamp to filter out old videocalls on load
   const mountTimeRef = useRef<number>(Date.now());
@@ -146,8 +150,10 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
   // Listen for real-time video calls updates
   useEffect(() => {
     setVideoCalls(getVideoCalls());
+    setUsers(getUsers());
     const unsubscribe = subscribeToDatabase(() => {
       setVideoCalls(getVideoCalls());
+      setUsers(getUsers());
     });
     return () => unsubscribe();
   }, []);
@@ -222,7 +228,31 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
   // Start call
   const handleStartCall = async () => {
     if (!dialingReceiverId) return;
-    const target = PREDEFINED_USERS.find(u => u.id === dialingReceiverId);
+    
+    let cleanedLink = customMeetLink.trim();
+    setMeetLinkError('');
+
+    if (!cleanedLink) {
+      setMeetLinkError('Por favor ingresa un enlace o código de Google Meet.');
+      return;
+    }
+
+    // Auto-format short-codes to standard Google Meet URLs
+    const codeRegex = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/i;
+    const cleanCodeRegex = /^[a-z]{10}$/i;
+    if (codeRegex.test(cleanedLink)) {
+      cleanedLink = `https://meet.google.com/${cleanedLink.toLowerCase()}`;
+    } else if (cleanCodeRegex.test(cleanedLink)) {
+      const parts = [cleanedLink.substring(0, 3), cleanedLink.substring(3, 7), cleanedLink.substring(7)];
+      cleanedLink = `https://meet.google.com/${parts.join('-').toLowerCase()}`;
+    }
+
+    if (!cleanedLink.toLowerCase().includes('meet.google.com/')) {
+      setMeetLinkError('El enlace debe ser un enlace de Google Meet válido (ej: https://meet.google.com/xxx-yyyy-zzz).');
+      return;
+    }
+
+    const target = users.find(u => u.id === dialingReceiverId);
     if (!target) return;
 
     setIsCallingAPI(true);
@@ -232,9 +262,12 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
         currentUser.nombre,
         currentUser.role,
         target.id,
-        target.nombre
+        target.nombre,
+        cleanedLink
       );
       setShowDialer(false);
+      setCustomMeetLink('');
+      setMeetLinkError('');
     } catch (e) {
       console.error("Error starting Meet call:", e);
       alert("No se pudo iniciar la llamada de Google Meet.");
@@ -274,7 +307,7 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
   };
 
   // Predefined users available to be called (Admins and Treasurers, excluding ourselves)
-  const allowedTargets = PREDEFINED_USERS.filter(u => 
+  const allowedTargets = users.filter(u => 
     (u.role === 'Admin' || u.role === 'Tesorera') && 
     u.id !== currentUser.id && 
     !u.isBlocked
@@ -292,6 +325,8 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
               return;
             }
             setDialingReceiverId(allowedTargets[0]?.id || '');
+            setCustomMeetLink('');
+            setMeetLinkError('');
             setShowDialer(true);
           }}
           className="fixed bottom-6 right-28 z-40 p-4 bg-gradient-to-tr from-emerald-600 to-teal-700 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer flex items-center justify-center border-2 border-white/20"
@@ -319,16 +354,19 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
             </div>
 
             <p className="text-xs text-slate-500 mb-4 leading-relaxed font-medium">
-              Inicia una videollamada de Google Meet de inmediato. La otra persona recibirá una alerta de audio y visual en tiempo real para unirse de inmediato.
+              Sigue estos sencillos pasos para iniciar una videollamada real de Google Meet con la otra persona en tiempo real:
             </p>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-500 tracking-wider mb-1.5">Seleccionar Destinatario (Admin / Tesorería)</label>
+            <div className="space-y-4 text-left">
+              {/* Step 1 */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <label className="block text-[10px] font-black uppercase text-emerald-700 tracking-wider mb-1.5">
+                  1. Seleccionar Colaborador
+                </label>
                 <select
                   value={dialingReceiverId}
                   onChange={(e) => setDialingReceiverId(e.target.value)}
-                  className="w-full text-xs font-bold p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-600 transition-all"
+                  className="w-full text-xs font-bold p-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-600 transition-all cursor-pointer"
                 >
                   {allowedTargets.map(t => (
                     <option key={t.id} value={t.id}>
@@ -338,7 +376,55 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
                 </select>
               </div>
 
-              <div className="flex gap-2.5 pt-2">
+              {/* Step 2 */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
+                <span className="block text-[10px] font-black uppercase text-emerald-700 tracking-wider">
+                  2. Generar Sala de Google Meet Real
+                </span>
+                <p className="text-[11px] text-slate-500 leading-normal">
+                  Haz clic abajo para abrir Google Meet en otra pestaña y crear una reunión real.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.open('https://meet.google.com/new', '_blank');
+                  }}
+                  className="w-full py-2 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm hover:scale-[1.01]"
+                >
+                  <ExternalLink className="h-4 w-4 text-emerald-600" />
+                  Crear Nueva Sala (Abrir en Meet)
+                </button>
+              </div>
+
+              {/* Step 3 */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1.5">
+                <label className="block text-[10px] font-black uppercase text-emerald-700 tracking-wider">
+                  3. Pegar Enlace o Código de la Reunión
+                </label>
+                <p className="text-[11px] text-slate-500 leading-normal mb-1">
+                  Copia la dirección de la barra de navegación de la nueva pestaña (ej. https://meet.google.com/xxx-yyyy-zzz) o el código de 10 letras y pégalo aquí:
+                </p>
+                <input
+                  type="text"
+                  placeholder="https://meet.google.com/xxx-yyyy-zzz o xxx-yyyy-zzz"
+                  value={customMeetLink}
+                  onChange={(e) => {
+                    setCustomMeetLink(e.target.value);
+                    setMeetLinkError('');
+                  }}
+                  className="w-full text-xs font-semibold p-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-600 transition-all placeholder:text-slate-400 font-mono"
+                />
+                {meetLinkError ? (
+                  <p className="text-[11px] text-red-600 font-bold">{meetLinkError}</p>
+                ) : customMeetLink.includes('meet.google.com/') ? (
+                  <p className="text-[11px] text-emerald-600 font-bold flex items-center gap-1">
+                    <Check className="h-3.5 w-3.5" /> Enlace de Meet válido detectado
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Footer Actions */}
+              <div className="flex gap-2.5 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowDialer(false)}
@@ -349,7 +435,7 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
                 <button
                   type="button"
                   onClick={handleStartCall}
-                  disabled={isCallingAPI || !dialingReceiverId}
+                  disabled={isCallingAPI || !dialingReceiverId || !customMeetLink.trim()}
                   className="flex-1 py-3 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 uppercase cursor-pointer disabled:opacity-50"
                 >
                   {isCallingAPI ? (

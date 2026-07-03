@@ -9,7 +9,9 @@ import {
   solicitarDesbloqueoCierre,
   aprobarDesbloqueoCierre,
   rechazarDesbloqueoCierre,
-  subscribeToDatabase
+  subscribeToDatabase,
+  requestTransactionChange,
+  resolveTransactionChange
 } from '../firebase';
 import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h } from '../utils/formato';
 import { Transaction, User, Sede, CierreCaja } from '../types';
@@ -55,6 +57,16 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const [docType, setDocType] = useState<'Recibo' | 'Remisión' | 'Ignorado'>('Remisión');
   const [justificacion, setJustificacion] = useState('');
   const [nroReciboCaja, setNroReciboCaja] = useState('');
+
+  // States for cashier requesting change/unlock
+  const [requestChangeTxId, setRequestChangeTxId] = useState<string | null>(null);
+  const [requestChangeReason, setRequestChangeReason] = useState<string>('');
+
+  // States for admin correcting a transaction
+  const [adminCorrectingTxId, setAdminCorrectingTxId] = useState<string | null>(null);
+  const [adminSelectedAdvisor, setAdminSelectedAdvisor] = useState<string>('');
+  const [adminDocType, setAdminDocType] = useState<'Recibo' | 'Remisión' | 'Ignorado'>('Remisión');
+  const [adminJustificacion, setAdminJustificacion] = useState<string>('');
 
   // Cierre de caja state
   const [cierreFecha, setCierreFecha] = useState('');
@@ -285,6 +297,89 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
           </div>
         </div>
       </div>
+
+      {/* SECCIÓN DE SOLICITUDES DE CAMBIO PENDIENTES (Solo visible para Admin) */}
+      {currentUser.role === 'Admin' && (
+        (() => {
+          const pendingRequests = transactions.filter(t => t.solicitudCambio === 'pendiente' && !t.esHistorico);
+          if (pendingRequests.length === 0) return null;
+          
+          return (
+            <div className="bg-gradient-to-r from-[#1A2D7C] to-[#2B3F94] rounded-2xl p-5 border border-amber-500/30 shadow-lg text-white space-y-4 animate-in slide-in-from-top-4 duration-300">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                  </span>
+                  <h3 className="font-extrabold text-sm uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                    <AlertTriangle className="h-4 w-4 text-amber-400" />
+                    Solicitudes de Cambio / Corrección Pendientes ({pendingRequests.length})
+                  </h3>
+                </div>
+                <span className="text-[10px] bg-amber-500 text-slate-950 font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest">
+                  Requiere Atención
+                </span>
+              </div>
+              
+              <div className="divide-y divide-white/10 max-h-[350px] overflow-y-auto pr-2 space-y-3.5">
+                {pendingRequests.map(tx => (
+                  <div key={tx.id} className="pt-3.5 first:pt-0 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-mono font-black bg-white/10 px-2 py-0.5 rounded text-white border border-white/5">
+                          ID: {tx.llaveUnica.slice(-8).toUpperCase()}
+                        </span>
+                        <span className="text-xs font-black text-amber-300">{formatCOP(tx.valor)}</span>
+                        <span className="text-[10px] bg-slate-850 border border-white/10 px-2 py-0.5 rounded uppercase font-bold">{tx.sede}</span>
+                        <span className="text-[10px] text-slate-300 font-mono font-semibold">{formatDateHuman(tx.fecha)}</span>
+                      </div>
+                      <p className="text-xs text-white/90 font-medium">
+                        Solicitado por: <strong className="text-amber-400">{tx.solicitudUsuario}</strong> en <span className="font-mono text-[10.5px] text-white/70">{tx.solicitudFecha}</span>
+                      </p>
+                      <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                        <p className="text-xs text-slate-200 font-bold leading-relaxed">
+                          💬 Motivo: <span className="font-medium text-white italic">"{tx.solicitudMotivo}"</span>
+                        </p>
+                        <p className="text-[10px] text-slate-300 mt-1">
+                          Estado actual del pago: <span className="font-semibold text-white uppercase">{tx.tipoDocumento} ({tx.asesor || 'Sin Asesor'})</span>
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-2 shrink-0 flex-wrap">
+                      <button
+                        onClick={() => {
+                          if (confirm(`¿Estás seguro de liberar/desbloquear esta transacción? Volverá al estado Pendiente para que ${tx.solicitudUsuario} la identifique de nuevo.`)) {
+                            resolveTransactionChange(tx.id, 'liberar', currentUser.nombre);
+                            onRefreshData();
+                          }
+                        }}
+                        className="py-2 px-3 bg-[#0F9D58] hover:bg-emerald-600 text-white rounded-xl text-[11px] font-black uppercase transition-all shadow flex items-center gap-1 cursor-pointer"
+                      >
+                        <Unlock className="h-3.5 w-3.5" />
+                        Liberar Pago
+                      </button>
+                      <button
+                        onClick={() => {
+                          setAdminCorrectingTxId(tx.id);
+                          setAdminSelectedAdvisor(tx.asesor || '');
+                          setAdminDocType(tx.tipoDocumento || 'Remisión');
+                          setAdminJustificacion(tx.justificacionIgnorado || '');
+                        }}
+                        className="py-2 px-3 bg-[#F47920] hover:bg-[#F47920]/90 text-white rounded-xl text-[11px] font-black uppercase transition-all shadow flex items-center gap-1 cursor-pointer"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Corregir Directamente
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()
+      )}
 
       {/* Filter Bar */}
       <div id="filter-bar" className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center gap-4">
@@ -916,20 +1011,137 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                               {formatDateTime12h(tx.fechaIdentificacion)}
                             </p>
 
-                            {/* Revert controls ONLY for Admin roles */}
+                            {/* Revert and Change Request controls */}
                             {currentUser.role === 'Admin' ? (
-                              <button
-                                id={`btn-revert-tx-${tx.id}`}
-                                onClick={() => handleRevert(tx.id)}
-                                className="w-full mt-1.5 flex items-center justify-center gap-1.5 py-1 text-[9px] bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold rounded transition-colors cursor-pointer"
-                              >
-                                <Undo2 className="h-2.5 w-2.5" />
-                                Revertir Validación (Admin)
-                              </button>
+                              <div className="space-y-1.5">
+                                <button
+                                  id={`btn-revert-tx-${tx.id}`}
+                                  onClick={() => handleRevert(tx.id)}
+                                  className="w-full mt-1.5 flex items-center justify-center gap-1.5 py-1 text-[9px] bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold rounded transition-colors cursor-pointer"
+                                >
+                                  <Undo2 className="h-2.5 w-2.5" />
+                                  Revertir Validación (Admin)
+                                </button>
+                                
+                                {tx.solicitudCambio === 'pendiente' && (
+                                  <div className="p-2 bg-amber-50 rounded-lg border border-amber-200 text-left space-y-1.5">
+                                    <p className="text-[10px] font-bold text-amber-850 flex items-center gap-1">
+                                      <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                      </span>
+                                      Solicitud de Cambio:
+                                    </p>
+                                    <p className="text-[9.5px] text-slate-600 font-medium italic">
+                                      "{tx.solicitudMotivo}"
+                                    </p>
+                                    <div className="flex gap-1">
+                                      <button
+                                        onClick={() => {
+                                          if (confirm(`¿Liberar esta transacción?`)) {
+                                            resolveTransactionChange(tx.id, 'liberar', currentUser.nombre);
+                                            onRefreshData();
+                                          }
+                                        }}
+                                        className="flex-1 text-[9px] bg-teal-600 hover:bg-teal-700 text-white font-bold py-1 px-1.5 rounded cursor-pointer transition-colors text-center"
+                                      >
+                                        Liberar
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setAdminCorrectingTxId(tx.id);
+                                          setAdminSelectedAdvisor(tx.asesor || '');
+                                          setAdminDocType(tx.tipoDocumento || 'Remisión');
+                                          setAdminJustificacion(tx.justificacionIgnorado || '');
+                                        }}
+                                        className="flex-1 text-[9px] bg-[#F47920] hover:bg-orange-650 text-white font-bold py-1 px-1.5 rounded cursor-pointer transition-colors text-center"
+                                      >
+                                        Corregir
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             ) : (
-                              <div className="mt-1 flex items-center justify-center gap-1 text-[8px] text-slate-400 italic bg-slate-100/50 rounded py-0.5 border border-dashed">
-                                <Lock className="h-2 w-2" />
-                                Bloqueado para Cajeras
+                              <div className="mt-1.5 space-y-1.5">
+                                {tx.solicitudCambio === 'pendiente' ? (
+                                  <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-left animate-pulse">
+                                    <p className="text-[9.5px] font-extrabold text-amber-800">
+                                      ⏳ Solicitud Enviada
+                                    </p>
+                                    <p className="text-[9px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                                      Pendiente de aprobación por Admin.
+                                    </p>
+                                    <p className="text-[9.5px] text-slate-700 italic font-medium mt-1">
+                                      💬 "{tx.solicitudMotivo}"
+                                    </p>
+                                  </div>
+                                ) : tx.solicitudCambio === 'corregido' ? (
+                                  <div className="p-2 bg-emerald-50 border border-emerald-100 rounded-lg text-left">
+                                    <p className="text-[9.5px] font-extrabold text-emerald-800">
+                                      ✅ Corrección Aplicada
+                                    </p>
+                                    <p className="text-[9px] text-slate-500 leading-relaxed mt-0.5">
+                                      El Administrador corrigió esta transacción directamente.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="flex items-center justify-center gap-1 text-[8px] text-slate-400 italic bg-slate-100/50 rounded py-0.5 border border-dashed">
+                                      <Lock className="h-2 w-2" />
+                                      Bloqueado para Cajeras
+                                    </div>
+                                    
+                                    {requestChangeTxId === tx.id ? (
+                                      <div className="p-2 bg-slate-50 rounded border border-slate-200 space-y-2 text-left animate-in slide-in-from-top-1 duration-150">
+                                        <label className="block text-[9px] uppercase font-black text-slate-500 tracking-wider">Describa el Cambio Solicitado *</label>
+                                        <textarea
+                                          value={requestChangeReason}
+                                          onChange={(e) => setRequestChangeReason(e.target.value)}
+                                          placeholder="Ej: Era Remisión con asesor Pedro, no Recibo"
+                                          className="w-full text-[10px] font-bold p-1.5 bg-white border border-slate-300 rounded focus:outline-none focus:border-[#1A2D7C]"
+                                          rows={2}
+                                          required
+                                        />
+                                        <div className="flex gap-1">
+                                          <button
+                                            onClick={() => setRequestChangeTxId(null)}
+                                            className="flex-1 py-1 text-[9px] bg-slate-200 hover:bg-slate-300 font-bold rounded text-slate-600 transition-colors cursor-pointer"
+                                          >
+                                            Cancelar
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              if (!requestChangeReason.trim()) {
+                                                alert('Por favor ingrese el motivo del cambio solicitado.');
+                                                return;
+                                              }
+                                              requestTransactionChange(tx.id, currentUser.nombre, requestChangeReason);
+                                              setRequestChangeTxId(null);
+                                              setRequestChangeReason('');
+                                              onRefreshData();
+                                            }}
+                                            className="flex-1 py-1 text-[9px] bg-[#F47920] hover:bg-[#F47920]/90 font-bold rounded text-white shadow transition-colors cursor-pointer"
+                                          >
+                                            Enviar
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        id={`btn-solicitar-cambio-${tx.id}`}
+                                        onClick={() => {
+                                          setRequestChangeTxId(tx.id);
+                                          setRequestChangeReason('');
+                                        }}
+                                        className="w-full py-1.5 text-[9px] bg-orange-50 hover:bg-orange-100 text-[#F47920] border border-orange-100 hover:border-orange-200 font-black rounded uppercase transition-all tracking-wider flex items-center justify-center gap-1 cursor-pointer"
+                                      >
+                                        <HelpCircle className="h-3 w-3" />
+                                        Solicitar Cambio
+                                      </button>
+                                    )}
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -956,6 +1168,139 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
           </div>
         )}
       </div>
+
+      {/* MODAL DE CORRECCIÓN DIRECTA POR ADMIN */}
+      {adminCorrectingTxId && (() => {
+        const tx = transactions.find(t => t.id === adminCorrectingTxId);
+        if (!tx) return null;
+        
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-300">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-md w-full p-6 animate-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2 text-[#1A2D7C]">
+                  <FileCheck2 className="h-5 w-5" />
+                  <h3 className="font-extrabold text-sm uppercase tracking-wider">Corrección Directa (Admin)</h3>
+                </div>
+                <button 
+                  onClick={() => setAdminCorrectingTxId(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-all cursor-pointer"
+                >
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-xl mb-4 text-xs space-y-1 border border-slate-100">
+                <p className="font-bold text-slate-700">Detalles de Transacción:</p>
+                <div className="grid grid-cols-2 gap-2 text-slate-500 font-mono text-[10.5px]">
+                  <div>ID: {tx.llaveUnica.slice(-8).toUpperCase()}</div>
+                  <div className="text-right font-bold text-slate-800">{formatCOP(tx.valor)}</div>
+                  <div>Sede: {tx.sede}</div>
+                  <div className="text-right">{formatDateHuman(tx.fecha)}</div>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Solicitante: <strong className="text-[#1A2D7C]">{tx.solicitudUsuario}</strong>
+                </p>
+                <p className="text-[10px] text-amber-700 font-semibold bg-amber-50 p-1.5 rounded mt-1.5 leading-relaxed border border-amber-100 italic">
+                  💬 Motivo: "{tx.solicitudMotivo}"
+                </p>
+              </div>
+
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                if (adminDocType === 'Ignorado') {
+                  if (!adminJustificacion.trim()) {
+                    alert('Por favor ingrese la justificación para ignorar este pago.');
+                    return;
+                  }
+                } else {
+                  if (!adminSelectedAdvisor) {
+                    alert('Por favor seleccione un asesor responsable.');
+                    return;
+                  }
+                }
+                
+                resolveTransactionChange(tx.id, 'corregir', currentUser.nombre, {
+                  asesor: adminSelectedAdvisor,
+                  tipoDocumento: adminDocType,
+                  justificacionIgnorado: adminJustificacion
+                });
+                
+                setAdminCorrectingTxId(null);
+                onRefreshData();
+              }} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1.5">Tipo de Registro:</label>
+                  <div className="flex gap-2">
+                    {['Remisión', 'Recibo', 'Ignorado'].map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => {
+                          setAdminDocType(type as any);
+                          if (type === 'Ignorado') {
+                            setAdminSelectedAdvisor('');
+                          } else {
+                            setAdminJustificacion('');
+                          }
+                        }}
+                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer text-center ${adminDocType === type ? 'bg-[#1A2D7C] text-white shadow' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {adminDocType === 'Ignorado' ? (
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-bold text-rose-800 uppercase">Motivo de Descarte *:</label>
+                    <textarea
+                      placeholder="Indique los detalles de la corrección o por qué se descarta..."
+                      value={adminJustificacion}
+                      onChange={(e) => setAdminJustificacion(e.target.value)}
+                      rows={3}
+                      className="w-full border border-slate-200 rounded-xl p-3 text-xs bg-slate-50 font-bold text-slate-700 placeholder:text-slate-450 placeholder:font-normal focus:outline-none focus:border-rose-600"
+                      required
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase">Asesor Responsable *:</label>
+                    <select
+                      value={adminSelectedAdvisor}
+                      onChange={(e) => setAdminSelectedAdvisor(e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl p-3 text-xs bg-slate-50 font-bold text-slate-700 focus:outline-none focus:border-[#1A2D7C]"
+                    >
+                      <option value="">-- Seleccionar Asesor --</option>
+                      {advisors.map(adv => (
+                        <option key={adv} value={adv}>{adv}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdminCorrectingTxId(null)}
+                    className="flex-1 py-3 text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all uppercase cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 uppercase cursor-pointer"
+                  >
+                    <Check className="h-4 w-4" />
+                    Aplicar Cambios
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
