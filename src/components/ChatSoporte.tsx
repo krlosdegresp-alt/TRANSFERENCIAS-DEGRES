@@ -6,7 +6,11 @@ import {
   subscribeToDatabase, 
   getUsers,
   getCierresCaja,
-  startVideoCall
+  startVideoCall,
+  getTransactions,
+  getAdvisors,
+  resolveTransactionChange,
+  rejectTransactionChange
 } from '../firebase';
 import { ChatMessage, User, Role } from '../types';
 import { 
@@ -20,7 +24,10 @@ import {
   Trash2,
   AlertCircle,
   User as UserIcon,
-  Video
+  Video,
+  Check,
+  Edit,
+  Undo2
 } from 'lucide-react';
 
 interface ChatSoporteProps {
@@ -66,6 +73,12 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => getChatMessages());
   const [text, setText] = useState('');
+  
+  // States for handling transaction reversion requests directly within chat
+  const [editingRequestMsgId, setEditingRequestMsgId] = useState<string | null>(null);
+  const [editAsesor, setEditAsesor] = useState('');
+  const [editDocType, setEditDocType] = useState<'Recibo' | 'Remisión' | 'Ignorado'>('Remisión');
+  const [editJustificacion, setEditJustificacion] = useState('');
   
   // Threads & recipients selection
   // 'general' is the shared announcements channel
@@ -245,9 +258,9 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
     if (!text.trim()) return;
 
     if (selectedThread === 'general') {
-      // Only Admin can write in general announcements channel
-      if (currentUser.role !== 'Admin') {
-        alert('Solo los administradores pueden enviar anuncios en el canal general.');
+      // Only Admin and Tesorera can write in general announcements channel
+      if (currentUser.role !== 'Admin' && currentUser.role !== 'Tesorera') {
+        alert('Solo los administradores y tesoreros pueden enviar anuncios en el canal general.');
         return;
       }
     }
@@ -264,13 +277,13 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   };
 
   const handleDeleteMessage = (msgId: string) => {
-    if (currentUser.role !== 'Admin') return;
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Tesorera') return;
     if (confirm('¿Estás seguro de que deseas eliminar este mensaje del Soporte General?')) {
       deleteChatMessage(msgId);
     }
   };
 
-  const isWriteLocked = selectedThread === 'general' && currentUser.role !== 'Admin';
+  const isWriteLocked = selectedThread === 'general' && currentUser.role !== 'Admin' && currentUser.role !== 'Tesorera';
 
   // Count active unlocked requests for helper badges (Admins/Treasurers only)
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
@@ -446,18 +459,210 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                       
                       {/* Bubble content */}
                       <div className={`flex items-center gap-2 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                        <div 
-                          className={`rounded-2xl p-3 text-xs leading-relaxed font-medium shadow-sm ${
-                            isMe 
-                              ? 'bg-[#1A2D7C] text-white rounded-tr-none' 
-                              : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none'
-                          }`}
-                        >
-                          {msg.text}
-                        </div>
+                        {msg.text.includes('[REVERSION_PENDIENTE]') ? (() => {
+                          const lines = msg.text.split('\n');
+                          const colaboradorLine = lines.find(l => l.includes('• Colaborador:'));
+                          const colaborador = colaboradorLine ? colaboradorLine.replace('• Colaborador:', '').trim() : '';
+
+                          const transaccionLine = lines.find(l => l.includes('• Transacción:'));
+                          const transaccion = transaccionLine ? transaccionLine.replace('• Transacción:', '').trim() : '';
+
+                          const valorLine = lines.find(l => l.includes('• Valor:'));
+                          const valor = valorLine ? valorLine.replace('• Valor:', '').trim() : '';
+
+                          const sedeLine = lines.find(l => l.includes('• Sede:'));
+                          const sede = sedeLine ? sedeLine.replace('• Sede:', '').trim() : '';
+
+                          const motivoLine = lines.find(l => l.includes('• Motivo:'));
+                          const motivo = motivoLine ? motivoLine.replace('• Motivo:', '').trim() : '';
+
+                          const txIdLine = lines.find(l => l.includes('• TxId:'));
+                          const txId = txIdLine ? txIdLine.replace('• TxId:', '').trim() : '';
+
+                          const tx = getTransactions().find(t => t.id === txId);
+                          const advisorsList = getAdvisors();
+
+                          return (
+                            <div className="rounded-2xl p-3 bg-amber-50 border border-amber-200 text-slate-800 text-xs shadow-sm max-w-[95%]">
+                              <div className="flex items-center gap-1.5 font-bold text-amber-800 mb-2">
+                                <AlertCircle className="h-3.5 w-3.5 text-amber-700" />
+                                <span>Solicitud de Reversión</span>
+                              </div>
+                              <div className="space-y-1 text-[11px] mb-2 font-medium">
+                                <div><span className="font-bold text-slate-600">Sede:</span> {sede}</div>
+                                <div><span className="font-bold text-slate-600">Usuario:</span> {colaborador}</div>
+                                <div><span className="font-bold text-slate-600">Transacción:</span> {transaccion}</div>
+                                <div><span className="font-bold text-slate-600">Valor:</span> {valor}</div>
+                                <div className="bg-white/80 p-1.5 rounded border border-amber-100 italic mt-1 text-slate-700">
+                                  <span className="font-bold not-italic text-slate-600 block text-[9px] uppercase tracking-wider">Motivo:</span>
+                                  "{motivo}"
+                                </div>
+                              </div>
+
+                              {/* Status Badges */}
+                              {(!tx || !tx.solicitudCambio) && (
+                                <div className="text-[10px] font-black uppercase text-rose-600 bg-rose-50 border border-rose-100 rounded p-1 text-center mt-1">
+                                  ❌ Solicitud Rechazada o Resuelta
+                                </div>
+                              )}
+                              {tx && tx.solicitudCambio === 'liberado' && (
+                                <div className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-50 border border-emerald-100 rounded p-1 text-center mt-1 font-sans">
+                                  ✅ Aprobada • Transacción Liberada
+                                </div>
+                              )}
+                              {tx && tx.solicitudCambio === 'corregido' && (
+                                <div className="text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-100 rounded p-1 text-center mt-1 font-sans">
+                                  ✅ Corregida por Admin
+                                </div>
+                              )}
+
+                              {/* Pending actions for Admin */}
+                              {tx && tx.solicitudCambio === 'pendiente' && (
+                                <>
+                                  {currentUser.role === 'Admin' || currentUser.role === 'Tesorera' ? (
+                                    <div className="mt-2 space-y-1">
+                                      {editingRequestMsgId === msg.id ? (
+                                        <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-inner space-y-2 mt-1">
+                                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Editar & Corregir</div>
+                                          
+                                          <div>
+                                            <label className="block text-[9px] font-bold text-slate-500 mb-0.5">Asesor:</label>
+                                            <select
+                                              value={editAsesor}
+                                              onChange={(e) => setEditAsesor(e.target.value)}
+                                              className="w-full text-[10px] p-1 border border-slate-300 rounded font-semibold bg-white"
+                                            >
+                                              <option value="">Seleccione asesor...</option>
+                                              {advisorsList.map(adv => (
+                                                <option key={adv} value={adv}>{adv}</option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          <div>
+                                            <label className="block text-[9px] font-bold text-slate-500 mb-0.5">Documento:</label>
+                                            <select
+                                              value={editDocType}
+                                              onChange={(e) => setEditDocType(e.target.value as any)}
+                                              className="w-full text-[10px] p-1 border border-slate-300 rounded font-semibold bg-white"
+                                            >
+                                              <option value="Recibo">Recibo</option>
+                                              <option value="Remisión">Remisión</option>
+                                              <option value="Ignorado">Ignorado</option>
+                                            </select>
+                                          </div>
+
+                                          {editDocType === 'Ignorado' && (
+                                            <div>
+                                              <label className="block text-[9px] font-bold text-slate-500 mb-0.5">Justificación de Ignorado:</label>
+                                              <input
+                                                type="text"
+                                                value={editJustificacion}
+                                                onChange={(e) => setEditJustificacion(e.target.value)}
+                                                className="w-full text-[10px] p-1 border border-slate-300 rounded bg-white"
+                                                placeholder="Ej: Duplicado, error..."
+                                                required
+                                              />
+                                            </div>
+                                          )}
+
+                                          <div className="flex gap-1 pt-1">
+                                            <button
+                                              type="button"
+                                              onClick={() => setEditingRequestMsgId(null)}
+                                              className="flex-1 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[9px] rounded transition-colors cursor-pointer"
+                                            >
+                                              Cancelar
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (editDocType === 'Ignorado' && !editJustificacion.trim()) {
+                                                  alert('Por favor ingrese la justificación para Ignorado.');
+                                                  return;
+                                                }
+                                                resolveTransactionChange(tx.id, 'corregir', currentUser.nombre, {
+                                                  asesor: editAsesor || null,
+                                                  tipoDocumento: editDocType,
+                                                  justificacionIgnorado: editDocType === 'Ignorado' ? editJustificacion : null
+                                                }, currentUser.role);
+                                                setEditingRequestMsgId(null);
+                                              }}
+                                              className="flex-1 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[9px] rounded shadow-sm transition-colors cursor-pointer"
+                                            >
+                                              Guardar
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="grid grid-cols-3 gap-1 mt-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (confirm('¿Confirmar reversión y liberar transacción? Volverá a estar disponible para conciliar.')) {
+                                                resolveTransactionChange(tx.id, 'liberar', currentUser.nombre, undefined, currentUser.role);
+                                              }
+                                            }}
+                                            className="bg-emerald-600 hover:bg-emerald-700 text-white py-1 px-1 rounded text-[9px] font-black uppercase shadow transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                            title="Confirmar liberación"
+                                          >
+                                            <Check className="h-2.5 w-2.5" />
+                                            Confirmar
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (confirm('¿Rechazar esta solicitud de reversión?')) {
+                                                rejectTransactionChange(tx.id, currentUser.nombre);
+                                              }
+                                            }}
+                                            className="bg-rose-600 hover:bg-rose-700 text-white py-1 px-1 rounded text-[9px] font-black uppercase shadow transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                            title="Rechazar solicitud"
+                                          >
+                                            <X className="h-2.5 w-2.5" />
+                                            Rechazar
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingRequestMsgId(msg.id);
+                                              setEditAsesor(tx.asesor || '');
+                                              setEditDocType(tx.tipoDocumento || 'Remisión');
+                                              setEditJustificacion(tx.justificacionIgnorado || '');
+                                            }}
+                                            className="bg-slate-700 hover:bg-slate-800 text-white py-1 px-1 rounded text-[9px] font-black uppercase shadow transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                            title="Editar y Corregir"
+                                          >
+                                            <Edit className="h-2.5 w-2.5" />
+                                            Editar
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] font-bold text-amber-800 bg-amber-100 rounded-lg p-1.5 text-center mt-2 flex items-center justify-center gap-1 font-sans">
+                                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-600 animate-pulse"></span>
+                                      ⏳ Pendiente de aprobación por Admin
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          );
+                        })() : (
+                          <div 
+                            className={`rounded-2xl p-3 text-xs leading-relaxed font-medium shadow-sm ${
+                              isMe 
+                                ? 'bg-[#1A2D7C] text-white rounded-tr-none' 
+                                : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none'
+                            }`}
+                          >
+                            {msg.text}
+                          </div>
+                        )}
 
                         {/* Admin delete message button - only in general announcements and for Admin roles */}
-                        {isGeneralChannel && currentUser.role === 'Admin' && (
+                        {isGeneralChannel && (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
                           <button
                             onClick={() => handleDeleteMessage(msg.id)}
                             className="p-1 bg-red-50 text-red-600 hover:bg-red-100 rounded transition-all cursor-pointer shadow-sm shrink-0 opacity-100 md:opacity-0 md:group-hover/msg:opacity-100"

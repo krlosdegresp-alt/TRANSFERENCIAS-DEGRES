@@ -174,8 +174,8 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   };
 
   const handleRevert = (id: string) => {
-    if (confirm('¿Está seguro de que desea revertir la identificación de este pago? Esta acción requerida por cajeros ha sido limitada a Administradores.')) {
-      const success = revertIdentification(id, currentUser.nombre);
+    if (confirm('¿Está seguro de que desea revertir la identificación de este pago? Esta acción requerida por cajeros ha sido limitada a Administradores/Tesorería.')) {
+      const success = revertIdentification(id, currentUser.nombre, currentUser.role);
       if (success) {
         onRefreshData();
       }
@@ -298,8 +298,8 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
         </div>
       </div>
 
-      {/* SECCIÓN DE SOLICITUDES DE CAMBIO PENDIENTES (Solo visible para Admin) */}
-      {currentUser.role === 'Admin' && (
+      {/* SECCIÓN DE SOLICITUDES DE CAMBIO PENDIENTES (Solo visible para Admin o Tesorera) */}
+      {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
         (() => {
           const pendingRequests = transactions.filter(t => t.solicitudCambio === 'pendiente' && !t.esHistorico);
           if (pendingRequests.length === 0) return null;
@@ -351,7 +351,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                       <button
                         onClick={() => {
                           if (confirm(`¿Estás seguro de liberar/desbloquear esta transacción? Volverá al estado Pendiente para que ${tx.solicitudUsuario} la identifique de nuevo.`)) {
-                            resolveTransactionChange(tx.id, 'liberar', currentUser.nombre);
+                            resolveTransactionChange(tx.id, 'liberar', currentUser.nombre, undefined, currentUser.role);
                             onRefreshData();
                           }
                         }}
@@ -1012,7 +1012,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                             </p>
 
                             {/* Revert and Change Request controls */}
-                            {currentUser.role === 'Admin' ? (
+                            {currentUser.role === 'Admin' || currentUser.role === 'Tesorera' ? (
                               <div className="space-y-1.5">
                                 <button
                                   id={`btn-revert-tx-${tx.id}`}
@@ -1020,7 +1020,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                                   className="w-full mt-1.5 flex items-center justify-center gap-1.5 py-1 text-[9px] bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold rounded transition-colors cursor-pointer"
                                 >
                                   <Undo2 className="h-2.5 w-2.5" />
-                                  Revertir Validación (Admin)
+                                  Revertir Validación (Admin/Tesorera)
                                 </button>
                                 
                                 {tx.solicitudCambio === 'pendiente' && (
@@ -1039,7 +1039,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                                       <button
                                         onClick={() => {
                                           if (confirm(`¿Liberar esta transacción?`)) {
-                                            resolveTransactionChange(tx.id, 'liberar', currentUser.nombre);
+                                            resolveTransactionChange(tx.id, 'liberar', currentUser.nombre, undefined, currentUser.role);
                                             onRefreshData();
                                           }
                                         }}
@@ -1116,10 +1116,11 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                                                 alert('Por favor ingrese el motivo del cambio solicitado.');
                                                 return;
                                               }
-                                              requestTransactionChange(tx.id, currentUser.nombre, requestChangeReason);
+                                              requestTransactionChange(tx.id, currentUser, requestChangeReason);
                                               setRequestChangeTxId(null);
                                               setRequestChangeReason('');
                                               onRefreshData();
+                                              alert('Ya se le notificó al administrador de que tiene una reversión pendiente.');
                                             }}
                                             className="flex-1 py-1 text-[9px] bg-[#F47920] hover:bg-[#F47920]/90 font-bold rounded text-white shadow transition-colors cursor-pointer"
                                           >
@@ -1224,7 +1225,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                   asesor: adminSelectedAdvisor,
                   tipoDocumento: adminDocType,
                   justificacionIgnorado: adminJustificacion
-                });
+                }, currentUser.role);
                 
                 setAdminCorrectingTxId(null);
                 onRefreshData();

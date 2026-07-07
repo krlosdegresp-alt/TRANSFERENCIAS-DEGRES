@@ -38,6 +38,9 @@ export interface Transaction {
   solicitudMotivo?: string | null;
   solicitudUsuario?: string | null;
   solicitudFecha?: string | null;
+  revertidoPorUsuario?: string | null;
+  revertidoPorRol?: string | null;
+  revertidoFecha?: string | null;
 }
 
 export interface AuditLog {

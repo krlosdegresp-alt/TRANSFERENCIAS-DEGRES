@@ -288,12 +288,16 @@ initializeRealtimeListeners();
 // Ensure Carlos Ti and other predefined users are in Firestore if not already present
 async function ensurePredefinedUsersInFirestore() {
   try {
-    for (const u of PREDEFINED_USERS) {
-      const userDocRef = doc(db, 'users', u.id);
-      const docSnap = await getDoc(userDocRef);
-      if (!docSnap.exists()) {
-        await setDoc(userDocRef, u);
+    const usersColRef = collection(db, 'users');
+    const snap = await getDocs(usersColRef);
+    if (snap.empty) {
+      console.log("Seeding PREDEFINED_USERS to Firestore...");
+      const bWrite = writeBatch(db);
+      for (const u of PREDEFINED_USERS) {
+        bWrite.set(doc(db, 'users', u.id), u);
       }
+      await bWrite.commit();
+      console.log("PREDEFINED_USERS successfully seeded.");
     }
   } catch (error) {
     console.error("Error ensuring predefined users in Firestore:", error);
@@ -301,15 +305,34 @@ async function ensurePredefinedUsersInFirestore() {
 }
 ensurePredefinedUsersInFirestore();
 
+// Ensure initial transactions are seeded if none exist in Firestore
+async function ensurePredefinedTransactionsInFirestore() {
+  try {
+    const txsColRef = collection(db, 'transactions');
+    const snap = await getDocs(txsColRef);
+    if (snap.empty) {
+      console.log("Seeding INITIAL_TRANSACTIONS to Firestore...");
+      const bWrite = writeBatch(db);
+      for (const tx of INITIAL_TRANSACTIONS) {
+        bWrite.set(doc(db, 'transactions', tx.id), tx);
+      }
+      await bWrite.commit();
+      console.log("INITIAL_TRANSACTIONS successfully seeded.");
+    }
+  } catch (error) {
+    console.error("Error ensuring predefined transactions in Firestore:", error);
+  }
+}
+ensurePredefinedTransactionsInFirestore();
+
 // ----------------------------------------------------
 // USERS OPERATIONS
 // ----------------------------------------------------
 export function getUsers(): User[] {
   const data = localStorage.getItem(STORAGE_USERS_KEY);
-  if (!data) return PREDEFINED_USERS;
+  if (data === null) return PREDEFINED_USERS;
   try {
-    const list = JSON.parse(data) as User[];
-    return list.length === 0 ? PREDEFINED_USERS : list;
+    return JSON.parse(data) as User[];
   } catch (e) {
     return PREDEFINED_USERS;
   }
@@ -425,12 +448,12 @@ export function saveUploadBatches(batches: UploadBatch[]) {
   syncArrayToFirestore('batches', batches);
 }
 
-export function uploadBankTransactions(
+export async function uploadBankTransactions(
   newTxs: Transaction[], 
   uploaderName: string, 
   fileName?: string,
   fileBlob?: File | null
-): { imported: number; duplicates: number } {
+): Promise<{ imported: number; duplicates: number }> {
   const current = getTransactions();
   const currentKeysSet = new Set(current.map(tx => tx.llaveUnica));
 
@@ -453,12 +476,6 @@ export function uploadBankTransactions(
 
   const finalFileName = fileName || 'archivo_movimientos.xlsx';
 
-  // 1. Optimistic UI update
-  if (toAdd.length > 0) {
-    const updated = [...toAdd, ...current];
-    localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(updated));
-  }
-
   const batches = getUploadBatches();
   const newBatch: UploadBatch = {
     id: batchId,
@@ -469,55 +486,51 @@ export function uploadBankTransactions(
     totalImportados: imported,
     totalDuplicados: duplicates
   };
-  batches.unshift(newBatch);
-  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batches));
-  notifyListeners();
 
-  // 2. Persistent upload & db save in the background
-  (async () => {
-    try {
-      let downloadUrl = '';
-      if (fileBlob) {
-        try {
-          const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
-          const snapshot = await uploadBytes(storageRef, fileBlob);
-          downloadUrl = await getDownloadURL(snapshot.ref);
-        } catch (stgErr) {
-          console.error("Firebase Storage upload error:", stgErr);
-        }
+  // 2. Persistent upload & db save synchronously
+  try {
+    let downloadUrl = '';
+    if (fileBlob) {
+      try {
+        const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
+        const snapshot = await uploadBytes(storageRef, fileBlob);
+        downloadUrl = await getDownloadURL(snapshot.ref);
+      } catch (stgErr) {
+        console.error("Firebase Storage upload error:", stgErr);
       }
-
-      // Save transactions
-      if (toAdd.length > 0) {
-        const chunks = [];
-        for (let i = 0; i < toAdd.length; i += 500) {
-          chunks.push(toAdd.slice(i, i + 500));
-        }
-        for (const chunk of chunks) {
-          const bWrite = writeBatch(db);
-          chunk.forEach(tx => {
-            bWrite.set(doc(db, 'transactions', tx.id), tx);
-          });
-          await bWrite.commit();
-        }
-      }
-
-      // Save upload batch record with file URL
-      const persistentBatch: UploadBatch = {
-        ...newBatch,
-        archivoUrl: downloadUrl || undefined
-      };
-      await setDoc(doc(db, 'batches', batchId), persistentBatch);
-
-      await addAuditLog(
-        uploaderName,
-        'Carga de Archivo',
-        `Subió '${persistentBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
-      );
-    } catch (e) {
-      console.error("Error finalizing background excel upload:", e);
     }
-  })();
+
+    // Save transactions
+    if (toAdd.length > 0) {
+      const chunks = [];
+      for (let i = 0; i < toAdd.length; i += 500) {
+        chunks.push(toAdd.slice(i, i + 500));
+      }
+      for (const chunk of chunks) {
+        const bWrite = writeBatch(db);
+        chunk.forEach(tx => {
+          bWrite.set(doc(db, 'transactions', tx.id), tx);
+        });
+        await bWrite.commit();
+      }
+    }
+
+    // Save upload batch record with file URL
+    const persistentBatch: UploadBatch = {
+      ...newBatch,
+      archivoUrl: downloadUrl || undefined
+    };
+    await setDoc(doc(db, 'batches', batchId), persistentBatch);
+
+    await addAuditLog(
+      uploaderName,
+      'Carga de Archivo',
+      `Subió '${persistentBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
+    );
+  } catch (e) {
+    console.error("Error finalizing excel upload to Firestore:", e);
+    throw e;
+  }
 
   return { imported, duplicates };
 }
@@ -624,7 +637,7 @@ export function identifyTransaction(
   return true;
 }
 
-export function revertIdentification(id: string, adminName: string): boolean {
+export function revertIdentification(id: string, adminName: string, adminRole: string = 'Admin'): boolean {
   const current = getTransactions();
   const idx = current.findIndex(tx => tx.id === id);
   if (idx === -1) return false;
@@ -643,7 +656,10 @@ export function revertIdentification(id: string, adminName: string): boolean {
     solicitudCambio: null,
     solicitudMotivo: null,
     solicitudUsuario: null,
-    solicitudFecha: null
+    solicitudFecha: null,
+    revertidoPorUsuario: adminName,
+    revertidoPorRol: adminRole,
+    revertidoFecha: getColombiaDateTime().dateTimeStr
   };
 
   current[idx] = updatedTx;
@@ -658,13 +674,13 @@ export function revertIdentification(id: string, adminName: string): boolean {
   addAuditLog(
     adminName,
     'Reversión de Identificación',
-    `Revirtió transacción ${id.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor})`
+    `Revirtió transacción ${id.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor}) por ${adminRole}`
   );
 
   return true;
 }
 
-export function requestTransactionChange(id: string, user: string, reason: string): boolean {
+export function requestTransactionChange(id: string, user: User, reason: string): boolean {
   const current = getTransactions();
   const idx = current.findIndex(tx => tx.id === id);
   if (idx === -1) return false;
@@ -673,7 +689,7 @@ export function requestTransactionChange(id: string, user: string, reason: strin
     ...current[idx],
     solicitudCambio: 'pendiente' as const,
     solicitudMotivo: reason,
-    solicitudUsuario: user,
+    solicitudUsuario: user.nombre,
     solicitudFecha: getColombiaDateTime().dateTimeStr
   };
 
@@ -687,9 +703,20 @@ export function requestTransactionChange(id: string, user: string, reason: strin
   });
 
   addAuditLog(
-    user,
+    user.nombre,
     'Solicitud de Cambio',
     `Solicitó cambio/liberación para la transacción ${id.slice(-8).toUpperCase()} - Motivo: ${reason}`
+  );
+
+  // Send automatic chat message to 'general' so both cashier and admin see it in the general chat
+  const msgText = `[REVERSION_PENDIENTE] Solicitud de Reversión\n• Colaborador: ${user.nombre}\n• Transacción: ${updatedTx.llaveUnica.slice(-12).toUpperCase()}\n• Valor: $${updatedTx.valor.toLocaleString()}\n• Sede: ${updatedTx.sede}\n• Motivo: "${reason}"\n• TxId: ${id}`;
+  
+  sendChatMessage(
+    user.id,
+    user.nombre,
+    user.role,
+    msgText,
+    'general'
   );
 
   return true;
@@ -703,7 +730,8 @@ export function resolveTransactionChange(
     asesor?: string | null;
     tipoDocumento?: 'Recibo' | 'Remisión' | 'Ignorado' | null;
     justificacionIgnorado?: string | null;
-  }
+  },
+  adminRole: string = 'Admin'
 ): boolean {
   const current = getTransactions();
   const idx = current.findIndex(tx => tx.id === id);
@@ -722,12 +750,15 @@ export function resolveTransactionChange(
       nroReciboCaja: null,
       justificacionIgnorado: null,
       solicitudCambio: 'liberado' as const,
-      solicitudFecha: getColombiaDateTime().dateTimeStr
+      solicitudFecha: getColombiaDateTime().dateTimeStr,
+      revertidoPorUsuario: adminName,
+      revertidoPorRol: adminRole,
+      revertidoFecha: getColombiaDateTime().dateTimeStr
     };
     addAuditLog(
       adminName,
       'Liberación de Transacción',
-      `Aprobó liberación de transacción ${id.slice(-8).toUpperCase()} solicitada por ${updatedTx.solicitudUsuario}`
+      `Aprobó liberación de transacción ${id.slice(-8).toUpperCase()} solicitada por ${updatedTx.solicitudUsuario} (${adminRole})`
     );
   } else {
     updatedTx = {
@@ -756,6 +787,37 @@ export function resolveTransactionChange(
   setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
     console.error("Error resolving transaction change in Firestore:", err);
   });
+
+  return true;
+}
+
+export function rejectTransactionChange(id: string, adminName: string): boolean {
+  const current = getTransactions();
+  const idx = current.findIndex(tx => tx.id === id);
+  if (idx === -1) return false;
+
+  const updatedTx = {
+    ...current[idx],
+    solicitudCambio: null, // Clear the request status back to null
+    solicitudMotivo: null,
+    solicitudUsuario: null,
+    solicitudFecha: null
+  };
+
+  current[idx] = updatedTx;
+
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  notifyListeners();
+
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+    console.error("Error rejecting transaction change in Firestore:", err);
+  });
+
+  addAuditLog(
+    adminName,
+    'Rechazo de Cambio',
+    `Rechazó la solicitud de cambio/reversión para la transacción ${id.slice(-8).toUpperCase()}`
+  );
 
   return true;
 }
@@ -1075,7 +1137,8 @@ export function deleteChatMessage(id: string): boolean {
 function generateGoogleMeetLink(): string {
   const letters = 'abcdefghijklmnopqrstuvwxyz';
   const randSec = (len: number) => Array.from({ length: len }, () => letters[Math.floor(Math.random() * letters.length)]).join('');
-  return `https://meet.google.com/${randSec(3)}-${randSec(4)}-${randSec(3)}`;
+  // Use Jitsi Meet which provides 100% free, active and instantly working dynamic conference rooms
+  return `https://meet.jit.si/SoporteTransferencias_${randSec(4)}_${randSec(4)}`;
 }
 
 export function getVideoCalls(): VideoCall[] {

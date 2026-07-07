@@ -386,7 +386,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       'Confirmar Reversión',
       '¿Estás seguro de que deseas revertir este pago conciliado? Retornará a la sucursal asignada en estado Pendiente.',
       () => {
-        const success = revertIdentification(id, currentUser.nombre);
+        const success = revertIdentification(id, currentUser.nombre, currentUser.role);
         if (success) {
           onRefreshData();
           triggerAlert('Pago Revertido', 'La validación del pago ha sido revertida de forma exitosa.', 'success');
@@ -1124,6 +1124,67 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Historial de Reversiones Recientes */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+              <History className="h-4 w-4 text-indigo-600" />
+              <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">Historial de Reversiones Recientes (Audit Trail)</h4>
+            </div>
+            {transactions.filter(t => t.revertidoPorUsuario).length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-4">No se han registrado reversiones en esta sesión o base de datos.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[9px] border-b border-slate-100">
+                    <tr>
+                      <th className="p-2.5">Sede / Cuenta</th>
+                      <th className="p-2.5">Originalmente Identificada como</th>
+                      <th className="p-2.5">Revocada por</th>
+                      <th className="p-2.5">Fecha y Hora de Revocación</th>
+                      <th className="p-2.5 text-right">Valor COP</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {transactions
+                      .filter(t => t.revertidoPorUsuario)
+                      .sort((a, b) => {
+                        const dateA = a.revertidoFecha || '';
+                        const dateB = b.revertidoFecha || '';
+                        return dateB.localeCompare(dateA);
+                      })
+                      .map((tx) => (
+                        <tr key={tx.id} className="hover:bg-slate-50 font-sans">
+                          <td className="p-2.5">
+                            <span className="font-bold text-slate-800">{tx.sede}</span>
+                            <span className="text-[10px] text-slate-400 block font-mono">Cta: {tx.cuenta}</span>
+                          </td>
+                          <td className="p-2.5">
+                            <div className="text-[11px] text-slate-600 font-medium">{tx.descripcion}</div>
+                          </td>
+                          <td className="p-2.5">
+                            <div className="font-bold text-slate-700 flex items-center gap-1">
+                              <span>{tx.revertidoPorUsuario}</span>
+                              <span className={`text-[8px] uppercase tracking-wider px-1 rounded ${
+                                tx.revertidoPorRol === 'Admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {tx.revertidoPorRol || 'Admin'}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-2.5 text-slate-500 font-mono text-[10px]">
+                            {tx.revertidoFecha || 'N/A'}
+                          </td>
+                          <td className="p-2.5 text-right font-bold text-slate-700 font-mono">
+                            {formatCOP(tx.valor)}
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>

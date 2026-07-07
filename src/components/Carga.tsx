@@ -193,21 +193,28 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
     }
   };
 
-  const handleCommitQueue = () => {
+  const handleCommitQueue = async () => {
     if (parsedQueue.length === 0) return;
-
-    // Trigger upload with duplication filter, passing real filename and file blob for Firebase Storage
-    const res = uploadBankTransactions(
-      parsedQueue, 
-      currentUser.nombre, 
-      selectedFile?.name || 'archivo_movimientos.xlsx',
-      selectedFile
-    );
-    setUploadSummary(res);
-    setParsedQueue([]);
-    setSelectedFile(null);
-    setBatches(getUploadBatches()); // Update local file upload history
-    onRefreshData();
+    setLoading(true);
+    try {
+      // Trigger upload with duplication filter, passing real filename and file blob for Firebase Storage
+      const res = await uploadBankTransactions(
+        parsedQueue, 
+        currentUser.nombre, 
+        selectedFile?.name || 'archivo_movimientos.xlsx',
+        selectedFile
+      );
+      setUploadSummary(res);
+      setParsedQueue([]);
+      setSelectedFile(null);
+      setBatches(getUploadBatches()); // Update local file upload history
+      onRefreshData();
+    } catch (err) {
+      console.error(err);
+      triggerAlert('Error', 'No se pudieron registrar las transacciones en la base de datos de Firestore.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDeleteBatch = (batchId: string, fileName: string) => {
@@ -682,6 +689,17 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Synchronous DB Loading Overlay */}
+      {loading && (
+        <div className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm z-55 flex flex-col items-center justify-center text-white p-6">
+          <Loader2 className="h-16 w-16 text-[#F47920] animate-spin mb-4 stroke-[3.5]" />
+          <h3 className="text-xl font-bold uppercase tracking-wider font-space">Procesando y Guardando en la Nube...</h3>
+          <p className="text-white/60 text-xs mt-2 text-center max-w-xs font-mono">
+            Sincronizando movimientos con Firestore. Por favor, no cierres la ventana.
+          </p>
         </div>
       )}
 

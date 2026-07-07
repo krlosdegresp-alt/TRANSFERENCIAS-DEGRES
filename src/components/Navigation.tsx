@@ -42,7 +42,7 @@ export default function Navigation({
       id: 'transacciones',
       label: 'Validar Transacciones',
       icon: FileCheck2,
-      allowedRoles: ['Admin', 'Cajera']
+      allowedRoles: ['Admin', 'Tesorera', 'Cajera']
     },
     {
       id: 'reportes',
