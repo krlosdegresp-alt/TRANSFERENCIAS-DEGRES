@@ -347,7 +347,13 @@ export async function saveUsers(users: User[]) {
 
 export async function createUserInFirestore(user: User): Promise<void> {
   const docRef = doc(db, 'users', user.id);
-  await setDoc(docRef, user);
+  const cleanUser: Record<string, any> = {};
+  for (const [key, value] of Object.entries(user)) {
+    if (value !== undefined) {
+      cleanUser[key] = value;
+    }
+  }
+  await setDoc(docRef, cleanUser);
 }
 
 export async function deleteUserInFirestore(userId: string): Promise<void> {
