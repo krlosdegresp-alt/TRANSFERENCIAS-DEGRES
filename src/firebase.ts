@@ -487,6 +487,17 @@ export async function uploadBankTransactions(
   newTxs.forEach(tx => {
     if (currentKeysSet.has(tx.llaveUnica)) {
       duplicates++;
+      const existingTx = current.find(t => t.llaveUnica === tx.llaveUnica);
+      if (tx.identificada && existingTx && !existingTx.identificada) {
+        toAdd.push({
+          ...existingTx,
+          identificada: true,
+          fechaIdentificacion: tx.fechaIdentificacion || getColombiaDateTime().dateTimeStr,
+          usuarioIdentificacion: tx.usuarioIdentificacion || uploaderName,
+          asesor: tx.asesor || null,
+          tipoDocumento: tx.tipoDocumento || null
+        });
+      }
     } else {
       toAdd.push({
         ...tx,

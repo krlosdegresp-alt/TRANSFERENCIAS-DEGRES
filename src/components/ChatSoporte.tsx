@@ -320,7 +320,7 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
       {isOpen && (
         <div 
           id="chat-dialogue-window" 
-          className="absolute bottom-20 right-0 w-85 sm:w-96 h-[510px] bg-white rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-6 duration-300"
+          className="absolute bottom-20 right-0 w-85 sm:w-96 h-[420px] bg-white rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-6 duration-300"
         >
           {/* Header */}
           <div className="bg-[#1A2D7C] p-4 text-white flex items-center justify-between border-b border-white/10 shrink-0">
@@ -383,7 +383,7 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                 </option>
               ))}
             </select>
-            {selectedThread !== 'general' && (
+            {selectedThread !== 'general' && currentUser.role !== 'Cajera' && (
               <button
                 type="button"
                 onClick={async () => {

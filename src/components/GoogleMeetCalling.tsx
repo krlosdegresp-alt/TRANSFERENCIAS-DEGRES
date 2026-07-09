@@ -306,22 +306,30 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
     }
   };
 
-  // Predefined users available to be called (Admins and Treasurers, excluding ourselves)
-  const allowedTargets = users.filter(u => 
-    (u.role === 'Admin' || u.role === 'Tesorera') && 
-    u.id !== currentUser.id && 
-    !u.isBlocked
-  );
+  // Predefined users available to be called based on role permissions:
+  // - Asesor can call Tesorera or Admin.
+  // - Tesorera and Admin can call anyone (except themselves).
+  // - Cajera cannot start calls.
+  const allowedTargets = users.filter(u => {
+    if (u.id === currentUser.id || u.isBlocked) return false;
+    
+    if (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') {
+      return true;
+    } else if (currentUser.role === 'Asesor') {
+      return u.role === 'Admin' || u.role === 'Tesorera';
+    }
+    return false;
+  });
 
   return (
     <>
-      {/* Floating Call Launcher Button (Only visible if not currently in a call) */}
-      {!incomingCall && !outgoingCall && !acceptedCall && (
+      {/* Floating Call Launcher Button (Only visible if not currently in a call, and user is allowed to make calls) */}
+      {!incomingCall && !outgoingCall && !acceptedCall && currentUser.role !== 'Cajera' && (
         <button
           id="btn-google-meet-launcher"
           onClick={() => {
             if (allowedTargets.length === 0) {
-              alert("No hay Administradores ni Tesoreros disponibles para llamar en este momento.");
+              alert("No hay destinatarios válidos o disponibles para llamar en este momento.");
               return;
             }
             setDialingReceiverId(allowedTargets[0]?.id || '');

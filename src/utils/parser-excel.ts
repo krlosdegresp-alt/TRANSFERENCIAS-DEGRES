@@ -298,6 +298,95 @@ export function parseExcelBankFile(
   const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
   if (rawRows.length === 0) return [];
 
+  const currentTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+  // Check if this is an exported report from our application
+  let isExportedReport = false;
+  let reportHeaderIdx = -1;
+
+  for (let r = 0; r < Math.min(5, rawRows.length); r++) {
+    const row = rawRows[r];
+    if (row && row.some(cell => String(cell || '').trim() === 'Llave Única')) {
+      isExportedReport = true;
+      reportHeaderIdx = r;
+      break;
+    }
+  }
+
+  if (isExportedReport) {
+    const headerRow = rawRows[reportHeaderIdx];
+    const llaveCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Llave Única');
+    const fechaCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Fecha');
+    const horaCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Hora');
+    const descCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Descripción');
+    const valorCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Valor'));
+    const cuentaCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Banco Cuenta'));
+    const sedeCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Sede'));
+    const estadoCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Estado'));
+    const asesorCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Asesor'));
+    const tipoDocCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Tipo'));
+    const auxiliarCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Auxiliar'));
+    const fechaValCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Fecha de'));
+
+    const list: Transaction[] = [];
+
+    for (let r = reportHeaderIdx + 1; r < rawRows.length; r++) {
+      const row = rawRows[r];
+      if (!row || row.length < 2) continue;
+
+      const llave = String(row[llaveCol] || '').trim();
+      if (!llave || llave === 'Llave Única') continue;
+
+      let fechaStr = parseExcelDate(row[fechaCol]);
+      let horaStr = String(row[horaCol] || '').trim();
+      if (horaStr === 'No especificada') {
+        horaStr = '';
+      }
+
+      const desc = String(row[descCol] || '').trim().toUpperCase();
+      const valor = parseColombianNumber(row[valorCol]);
+      if (isNaN(valor) || valor <= 0) continue;
+
+      const cuenta = String(row[cuentaCol] || '').trim();
+      const sede = (String(row[sedeCol] || '').trim() || fallbackSede) as Sede;
+
+      const estadoStr = String(row[estadoCol] || '').trim().toUpperCase();
+      const identificada = estadoStr === 'CONCILIADO' || estadoStr === 'IDENTIFICADA';
+
+      const asesorVal = String(row[asesorCol] || '').trim();
+      const asesor = (asesorVal && asesorVal !== 'Ninguno') ? asesorVal : null;
+
+      const tipoDocVal = String(row[tipoDocCol] || '').trim();
+      const tipoDocumento = (tipoDocVal && tipoDocVal !== 'Ninguno') ? tipoDocVal as any : null;
+
+      const auxiliarVal = String(row[auxiliarCol] || '').trim();
+      const usuarioIdentificacion = (auxiliarVal && auxiliarVal !== 'Ninguno') ? auxiliarVal : null;
+
+      const fechaValVal = String(row[fechaValCol] || '').trim();
+      const fechaIdentificacion = (fechaValVal && fechaValVal !== 'Ninguno') ? fechaValVal : null;
+
+      list.push({
+        id: llave,
+        llaveUnica: llave,
+        fecha: fechaStr,
+        hora: horaStr,
+        descripcion: desc,
+        valor,
+        cuenta,
+        sede,
+        identificada,
+        fechaIdentificacion,
+        usuarioIdentificacion,
+        asesor,
+        tipoDocumento,
+        fechaCarga: currentTimestamp,
+        esHistorico: false
+      });
+    }
+
+    return list;
+  }
+
   // Define constant column indices as per client specification
   const fechaColIdx = 0;
   const descColIdx = 1;
@@ -307,7 +396,6 @@ export function parseExcelBankFile(
   const comprobanteColIdx = 5;
 
   const list: Transaction[] = [];
-  const currentTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   // Keep track of occurrences of (cuenta + fecha + valor + desc + comprobante) in this file to build stable unique keys
   const occurrenceCounts: Record<string, number> = {};
