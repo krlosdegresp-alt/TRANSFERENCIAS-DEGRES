@@ -515,7 +515,14 @@ export async function uploadBankTransactions(
     if (fileBlob) {
       try {
         const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
-        const snapshot = await uploadBytes(storageRef, fileBlob);
+        // 5-second timeout to avoid hanging if storage is unreachable or unconfigured
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Storage upload timeout (5s)')), 5000)
+        );
+        const snapshot = await Promise.race([
+          uploadBytes(storageRef, fileBlob),
+          timeoutPromise
+        ]) as any;
         downloadUrl = await getDownloadURL(snapshot.ref);
       } catch (stgErr) {
         console.error("Firebase Storage upload error:", stgErr);
@@ -531,7 +538,13 @@ export async function uploadBankTransactions(
       for (const chunk of chunks) {
         const bWrite = writeBatch(db);
         chunk.forEach(tx => {
-          bWrite.set(doc(db, 'transactions', tx.id), tx);
+          const cleanTx: Record<string, any> = {};
+          for (const [key, value] of Object.entries(tx)) {
+            if (value !== undefined) {
+              cleanTx[key] = value;
+            }
+          }
+          bWrite.set(doc(db, 'transactions', tx.id), cleanTx);
         });
         await bWrite.commit();
       }
@@ -542,7 +555,14 @@ export async function uploadBankTransactions(
       ...newBatch,
       archivoUrl: downloadUrl || undefined
     };
-    await setDoc(doc(db, 'batches', batchId), persistentBatch);
+    
+    const cleanPersistentBatch: Record<string, any> = {};
+    for (const [key, value] of Object.entries(persistentBatch)) {
+      if (value !== undefined) {
+        cleanPersistentBatch[key] = value;
+      }
+    }
+    await setDoc(doc(db, 'batches', batchId), cleanPersistentBatch);
 
     await addAuditLog(
       uploaderName,
