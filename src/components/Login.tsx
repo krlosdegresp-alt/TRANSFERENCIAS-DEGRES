@@ -31,69 +31,27 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     const activeUsers = getUsers();
     const matched = activeUsers.find(u => u.email.toLowerCase() === cleanMail);
     
-    if (matched && matched.isBlocked) {
+    if (!matched) {
+      setError('Acceso denegado. Este usuario no está creado ni habilitado en el sistema.');
+      return;
+    }
+
+    if (matched.isBlocked) {
       setError('Acceso denegado. Este usuario ha sido deshabilitado/bloqueado por el administrador.');
       return;
     }
 
     // Strict password verification
-    if (matched) {
-      const expectedPsw = matched.password || 'Degres123';
-      if (password !== expectedPsw) {
-        setError('Contraseña incorrecta para el usuario ingresado.');
-        return;
-      }
-    } else {
-      if (!password || password.length < 4) {
-        setError('La contraseña para nuevos registros debe tener al menos 4 caracteres.');
-        return;
-      }
+    const expectedPsw = matched.password || 'Degres123';
+    if (password !== expectedPsw) {
+      setError('Contraseña incorrecta para el usuario ingresado.');
+      return;
     }
 
-    const emailPrefix = cleanMail.split('@')[0];
-    
-    // Identify user’s active role and sede based on email prefix or predefined structure
-    let finalRole: Role = 'Cajera';
-    let finalSede: Sede | undefined = 'Guayabal';
-
-    if (matched) {
-      finalRole = matched.role;
-      finalSede = matched.sede || 'Guayabal';
-    } else {
-      // Automatic deduction based on email address prefix
-      if (emailPrefix.includes('admin') || emailPrefix.includes('calidad') || emailPrefix.includes('gestion')) {
-        finalRole = 'Admin';
-        finalSede = undefined;
-      } else if (emailPrefix.includes('tesor') || emailPrefix.includes('marta') || emailPrefix.includes('pagos')) {
-        finalRole = 'Tesorera';
-        finalSede = undefined;
-      } else if (emailPrefix.includes('asesor') || emailPrefix.includes('vendedor') || emailPrefix.includes('comercial') || emailPrefix.includes('venta')) {
-        finalRole = 'Asesor';
-        finalSede = undefined;
-      } else {
-        finalRole = 'Cajera';
-        if (emailPrefix.includes('sabaneta')) {
-          finalSede = 'Sabaneta';
-        } else if (emailPrefix.includes('naranjal')) {
-          finalSede = 'Naranjal';
-        } else {
-          finalSede = 'Guayabal';
-        }
-      }
-    }
-    
-    // If a new user is logged in, use their submitted password for registration
-    const logged = loginUser(cleanMail, finalRole, finalSede);
-    if (!matched && password) {
-      // update password for the newly created user in memory
-      const currentRegistered = getUsers();
-      const updated = currentRegistered.map(u => {
-        if (u.email.toLowerCase() === cleanMail) {
-          return { ...u, password };
-        }
-        return u;
-      });
-      saveUsers(updated);
+    const logged = loginUser(cleanMail);
+    if (!logged) {
+      setError('Error interno al iniciar sesión.');
+      return;
     }
     onLoginSuccess(logged);
   };

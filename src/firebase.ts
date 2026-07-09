@@ -9,7 +9,8 @@ import {
   updateDoc, 
   deleteDoc, 
   onSnapshot, 
-  writeBatch 
+  writeBatch,
+  deleteField 
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall } from './types';
@@ -344,6 +345,31 @@ export async function saveUsers(users: User[]) {
   await syncArrayToFirestore('users', users);
 }
 
+export async function createUserInFirestore(user: User): Promise<void> {
+  const docRef = doc(db, 'users', user.id);
+  await setDoc(docRef, user);
+}
+
+export async function deleteUserInFirestore(userId: string): Promise<void> {
+  const docRef = doc(db, 'users', userId);
+  await deleteDoc(docRef);
+}
+
+export async function updateUserInFirestore(userId: string, changes: Partial<User>): Promise<void> {
+  const docRef = doc(db, 'users', userId);
+  
+  const cleanChanges: Record<string, any> = {};
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) {
+      cleanChanges[key] = deleteField();
+    } else {
+      cleanChanges[key] = value;
+    }
+  }
+  
+  await updateDoc(docRef, cleanChanges);
+}
+
 export function getCurrentUser(): User | null {
   const data = sessionStorage.getItem(STORAGE_USER_KEY);
   if (!data) return null;
@@ -359,29 +385,19 @@ export function getCurrentUser(): User | null {
   }
 }
 
-export function loginUser(email: string, role?: Role, mockSede?: Sede): User {
+export function loginUser(email: string): User | null {
   const users = getUsers();
   const existing = users.find(
     u => u.email.toLowerCase() === email.toLowerCase()
   );
 
-  const finalUser = existing || {
-    id: 'custom_' + Date.now(),
-    email: email,
-    nombre: email.split('@')[0].toUpperCase(),
-    role: role || 'Cajera',
-    password: 'Degres123',
-    sede: mockSede || 'Guayabal'
-  };
-
   if (!existing) {
-    const updatedUsers = [...users, finalUser];
-    saveUsers(updatedUsers);
+    return null;
   }
 
-  sessionStorage.setItem(STORAGE_USER_KEY, JSON.stringify(finalUser));
-  addAuditLog(finalUser.nombre, 'Inicio de Sesión', `Usuario con rol ${finalUser.role} ingresó al aplicativo.`);
-  return finalUser;
+  sessionStorage.setItem(STORAGE_USER_KEY, JSON.stringify(existing));
+  addAuditLog(existing.nombre, 'Inicio de Sesión', `Usuario con rol ${existing.role} ingresó al aplicativo.`);
+  return existing;
 }
 
 export function logoutUser() {

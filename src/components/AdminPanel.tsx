@@ -5,7 +5,9 @@ import {
   executeMonthlyCleanup, 
   getAuditLogs, 
   getUsers,
-  saveUsers, 
+  createUserInFirestore,
+  deleteUserInFirestore,
+  updateUserInFirestore,
   addAuditLog,
   subscribeToDatabase,
   clearAllDatabase,
@@ -146,11 +148,14 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       password: newPassword ? newPassword.trim() : 'Degres123'
     };
 
-    const updated = [newUser, ...userList];
     setIsSavingUser(true);
     try {
-      setUserList(updated);
-      await saveUsers(updated);
+      // 1. Guardar primero en Firestore
+      await createUserInFirestore(newUser);
+
+      // 2. El estado local se actualiza DESPUÉS de confirmar que Firestore guardó el cambio correctamente
+      setUserList(prev => [newUser, ...prev]);
+
       addAuditLog(currentUser.nombre, 'Creación de Usuario', `Creado usuario ${newNombre} con rol ${newRole}`);
       triggerAlert('Colaborador Creado', `¡El colaborador "${newNombre}" ha sido guardado exitosamente en la base de datos!`, 'success');
       
@@ -159,36 +164,45 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       setNewEmail('');
       setNewPassword('');
       setShowAddForm(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      triggerAlert('Error de Guardado', 'Hubo un inconveniente al guardar el colaborador en la base de datos.', 'error');
+      triggerAlert('Error de Guardado', `Hubo un inconveniente al guardar el colaborador en la base de datos: ${error.message || error}`, 'error');
     } finally {
       setIsSavingUser(false);
     }
   };
 
   const handleUpdateUserRole = async (id: string, role: Role, sede?: Sede) => {
-    const updated = userList.map(u => {
-      if (u.id === id) {
-        return {
-          ...u,
-          role,
-          sede: role === 'Cajera' ? (sede || 'Guayabal') : undefined
-        };
-      }
-      return u;
-    });
+    const originalUser = userList.find(u => u.id === id);
+    if (!originalUser) return;
+
+    const changes = {
+      role,
+      sede: role === 'Cajera' ? (sede || 'Guayabal') : undefined
+    };
 
     setIsSavingUser(true);
     try {
+      // Guardar primero en Firestore usando updateDoc()
+      await updateUserInFirestore(id, changes);
+
+      // El estado local se actualiza DESPUÉS de confirmar que Firestore guardó el cambio correctamente
+      const updated = userList.map(u => {
+        if (u.id === id) {
+          return {
+            ...u,
+            ...changes
+          };
+        }
+        return u;
+      });
       setUserList(updated);
-      await saveUsers(updated);
-      const usr = userList.find(u => u.id === id);
-      addAuditLog(currentUser.nombre, 'Ajuste de Rol', `Modificado rol de ${usr?.nombre} a ${role}`);
+      
+      addAuditLog(currentUser.nombre, 'Ajuste de Rol', `Modificado rol de ${originalUser.nombre} a ${role}`);
       triggerAlert('Rol Actualizado', 'El rol del colaborador se actualizó y guardó exitosamente.', 'success');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      triggerAlert('Error', 'No se pudo guardar el cambio de rol.', 'error');
+      triggerAlert('Error', `No se pudo guardar el cambio de rol en la base de datos: ${err.message || err}`, 'error');
     } finally {
       setIsSavingUser(false);
     }
@@ -204,6 +218,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
   };
 
   const handleSaveEdit = async () => {
+    if (!editingUserId) return;
     if (!editNombre || !editEmail) {
       triggerAlert('Campos Incompletos', 'Por favor completa todos los campos.', 'error');
       return;
@@ -214,31 +229,41 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       return;
     }
 
-    const updated = userList.map(u => {
-      if (u.id === editingUserId) {
-        return {
-          ...u,
-          nombre: editNombre,
-          email: emailLower,
-          role: editRole,
-          isBlocked: u.isBlocked, // preserve existing block status
-          password: editRole !== 'Admin' ? (editPassword.trim() || u.password || 'Degres123') : u.password,
-          sede: editRole === 'Cajera' ? editSede : undefined
-        };
-      }
-      return u;
-    });
+    const originalUser = userList.find(u => u.id === editingUserId);
+    if (!originalUser) return;
+
+    const changes: Partial<User> = {
+      nombre: editNombre,
+      email: emailLower,
+      role: editRole,
+      password: editRole !== 'Admin' ? (editPassword.trim() || originalUser.password || 'Degres123') : originalUser.password,
+      sede: editRole === 'Cajera' ? editSede : undefined
+    };
 
     setIsSavingUser(true);
     try {
+      // 1. Guardar primero en Firestore usando updateDoc()
+      await updateUserInFirestore(editingUserId, changes);
+
+      // 2. El estado local se actualiza DESPUÉS de confirmar que Firestore guardó el cambio correctamente
+      const updated = userList.map(u => {
+        if (u.id === editingUserId) {
+          return {
+            ...u,
+            ...changes,
+            sede: editRole === 'Cajera' ? editSede : undefined
+          };
+        }
+        return u;
+      });
       setUserList(updated);
-      await saveUsers(updated);
+
       addAuditLog(currentUser.nombre, 'Edición de Colaborador', `Modificados datos del colaborador ${editNombre} (${emailLower})`);
       setEditingUserId(null);
       triggerAlert('Cambios Guardados', 'Los cambios en los datos del colaborador han sido guardados exitosamente.', 'success');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      triggerAlert('Error de Guardado', 'No se pudieron guardar las modificaciones.', 'error');
+      triggerAlert('Error de Guardado', `No se pudieron guardar las modificaciones en la base de datos: ${err.message || err}`, 'error');
     } finally {
       setIsSavingUser(false);
     }
@@ -273,7 +298,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     }
   };
 
-  const handleSaveAdminPsw = () => {
+  const handleSaveAdminPsw = async () => {
     if (!adminNewPsw || adminNewPsw.length < 4) {
       setAdminPswError('La contraseña debe tener al menos 4 caracteres.');
       return;
@@ -283,28 +308,35 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       return;
     }
 
-    const updated = userList.map(u => {
-      if (u.id === currentUser.id) {
-        return { ...u, password: adminNewPsw.trim() };
-      }
-      return u;
-    });
+    try {
+      // 1. Guardar primero en Firestore
+      await updateUserInFirestore(currentUser.id, { password: adminNewPsw.trim() });
 
-    setUserList(updated);
-    saveUsers(updated);
+      // 2. El estado local se actualiza DESPUÉS de confirmar que Firestore guardó el cambio correctamente
+      const updated = userList.map(u => {
+        if (u.id === currentUser.id) {
+          return { ...u, password: adminNewPsw.trim() };
+        }
+        return u;
+      });
+      setUserList(updated);
 
-    // Sync current session sessionStorage representations
-    const updatedUserObj = { ...currentUser, password: adminNewPsw.trim() };
-    sessionStorage.setItem('transf_current_user', JSON.stringify(updatedUserObj));
+      // Sync current session sessionStorage representations
+      const updatedUserObj = { ...currentUser, password: adminNewPsw.trim() };
+      sessionStorage.setItem('transf_current_user', JSON.stringify(updatedUserObj));
 
-    addAuditLog(currentUser.nombre, 'Actualización de Contraseña Admin', `El Administrador actualizó su propia contraseña tras autenticación de doble factor (2FA).`);
-    setAdminPswSuccess('¡Contraseña de Administrador actualizada con éxito!');
-    setAdminPswError('');
-    
-    // Auto close after 2 seconds
-    setTimeout(() => {
-      setShowAdminPswModal(false);
-    }, 2000);
+      addAuditLog(currentUser.nombre, 'Actualización de Contraseña Admin', `El Administrador actualizó su propia contraseña tras autenticación de doble factor (2FA).`);
+      setAdminPswSuccess('¡Contraseña de Administrador actualizada con éxito!');
+      setAdminPswError('');
+      
+      // Auto close after 2 seconds
+      setTimeout(() => {
+        setShowAdminPswModal(false);
+      }, 2000);
+    } catch (err: any) {
+      console.error(err);
+      setAdminPswError(`No se pudo actualizar la contraseña en la base de datos: ${err.message || err}`);
+    }
   };
 
   const handleDeleteUser = (id: string) => {
@@ -319,16 +351,20 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       'Confirmar Eliminación',
       `¿Estás seguro de que deseas eliminar permanentemente al colaborador ${usr.nombre}?`,
       async () => {
-        const updated = userList.filter(u => u.id !== id);
         setIsSavingUser(true);
         try {
+          // 1. Eliminar primero en Firestore
+          await deleteUserInFirestore(id);
+
+          // 2. El estado local se actualiza DESPUÉS de confirmar que Firestore borró el registro
+          const updated = userList.filter(u => u.id !== id);
           setUserList(updated);
-          await saveUsers(updated);
+
           addAuditLog(currentUser.nombre, 'Eliminación de Colaborador', `Eliminado permanentemente el colaborador ${usr.nombre}`);
           triggerAlert('Colaborador Eliminado', `¡El colaborador "${usr.nombre}" ha sido eliminado exitosamente del sistema!`, 'success');
-        } catch (error) {
+        } catch (error: any) {
           console.error(error);
-          triggerAlert('Error', 'No se pudo guardar la eliminación en la base de datos.', 'error');
+          triggerAlert('Error', `No se pudo guardar la eliminación en la base de datos: ${error.message || error}`, 'error');
         } finally {
           setIsSavingUser(false);
         }
@@ -354,25 +390,29 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       newStatus ? 'Bloquear Colaborador' : 'Habilitar Colaborador',
       confirmMessage,
       async () => {
-        const updated = userList.map(u => {
-          if (u.id === id) {
-            return { ...u, isBlocked: newStatus };
-          }
-          return u;
-        });
         setIsSavingUser(true);
         try {
+          // 1. Guardar primero en Firestore usando updateDoc()
+          await updateUserInFirestore(id, { isBlocked: newStatus });
+
+          // 2. El estado local se actualiza DESPUÉS de confirmar que Firestore guardó el cambio correctamente
+          const updated = userList.map(u => {
+            if (u.id === id) {
+              return { ...u, isBlocked: newStatus };
+            }
+            return u;
+          });
           setUserList(updated);
-          await saveUsers(updated);
+
           addAuditLog(currentUser.nombre, newStatus ? 'Deshabilitación' : 'Habilitación', `${newStatus ? 'Deshabilitado' : 'Habilitado'} colaborador ${usr.nombre}`);
           triggerAlert(
             newStatus ? 'Colaborador Bloqueado' : 'Colaborador Habilitado',
             `¡El colaborador "${usr.nombre}" ha sido ${newStatus ? 'bloqueado' : 'habilitado'} exitosamente!`,
             'success'
           );
-        } catch (error) {
+        } catch (error: any) {
           console.error(error);
-          triggerAlert('Error', 'No se pudo guardar el cambio de estado.', 'error');
+          triggerAlert('Error', `No se pudo guardar el cambio de estado en la base de datos: ${error.message || error}`, 'error');
         } finally {
           setIsSavingUser(false);
         }
