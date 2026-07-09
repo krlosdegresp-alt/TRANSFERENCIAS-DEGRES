@@ -93,6 +93,9 @@ export interface VideoCall {
   meetLink: string;
   status: 'pending' | 'accepted' | 'declined' | 'ended';
   createdAt: string;
+  type?: 'video' | 'voice';
+  acceptedAt?: string;
+  endedAt?: string;
 }
 
 

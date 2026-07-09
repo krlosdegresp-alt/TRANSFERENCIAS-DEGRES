@@ -1210,7 +1210,8 @@ export async function startVideoCall(
   senderRole: Role,
   receiverId: string,
   receiverName: string,
-  customMeetLink?: string
+  customMeetLink?: string,
+  type: 'video' | 'voice' = 'video'
 ): Promise<VideoCall> {
   const id = `call_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
   const meetLink = customMeetLink || generateGoogleMeetLink();
@@ -1223,7 +1224,8 @@ export async function startVideoCall(
     receiverName,
     meetLink,
     status: 'pending',
-    createdAt: getColombiaDateTime().dateTimeStr
+    createdAt: getColombiaDateTime().dateTimeStr,
+    type
   };
 
   const currentCalls = getVideoCalls();
@@ -1232,7 +1234,8 @@ export async function startVideoCall(
   notifyListeners();
 
   await setDoc(doc(db, 'videocalls', id), newCall);
-  addAuditLog(senderName, 'Llamada de Meet Iniciada', `Inició una videollamada de Google Meet para ${receiverName}.`);
+  const callTypeName = type === 'voice' ? 'Llamada de voz' : 'Videollamada';
+  addAuditLog(senderName, `${callTypeName} Iniciada`, `Inició una ${callTypeName.toLowerCase()} para ${receiverName}.`);
 
   return newCall;
 }
@@ -1243,17 +1246,64 @@ export async function updateVideoCallStatus(callId: string, status: 'accepted' |
   if (index !== -1) {
     const call = calls[index];
     call.status = status;
+    const nowStr = getColombiaDateTime().dateTimeStr;
+    const updatePayload: any = { status };
+
+    if (status === 'accepted') {
+      call.acceptedAt = nowStr;
+      updatePayload.acceptedAt = nowStr;
+    } else if (status === 'ended') {
+      call.endedAt = nowStr;
+      updatePayload.endedAt = nowStr;
+    }
+
     localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(calls));
     notifyListeners();
 
-    await setDoc(doc(db, 'videocalls', callId), { status }, { merge: true });
+    await setDoc(doc(db, 'videocalls', callId), updatePayload, { merge: true });
+
+    const callTypeName = call.type === 'voice' ? 'Llamada de voz' : 'Videollamada';
 
     if (status === 'accepted') {
-      addAuditLog(call.receiverName, 'Llamada de Meet Aceptada', `Aceptó la videollamada de Google Meet de ${call.senderName}.`);
+      addAuditLog(call.receiverName, `${callTypeName} Aceptada`, `Aceptó la ${callTypeName.toLowerCase()} de ${call.senderName}.`);
     } else if (status === 'declined') {
-      addAuditLog(call.receiverName, 'Llamada de Meet Rechazada', `Rechazó la videollamada de Google Meet de ${call.senderName}.`);
+      addAuditLog(call.receiverName, `${callTypeName} Rechazada`, `Rechazó la ${callTypeName.toLowerCase()} de ${call.senderName}.`);
+      sendChatMessage(
+        call.senderId,
+        call.senderName,
+        call.senderRole,
+        `📞 ${callTypeName} no contestada / rechazada`,
+        call.receiverId
+      );
     } else if (status === 'ended') {
-      addAuditLog(call.senderName, 'Llamada de Meet Finalizada', `Finalizó la videollamada de Google Meet con ${call.receiverName}.`);
+      addAuditLog(call.senderName, `${callTypeName} Finalizada`, `Finalizó la ${callTypeName.toLowerCase()} con ${call.receiverName}.`);
+      
+      // Calculate call duration
+      let durationText = 'duración desconocida';
+      const callFull = { ...call, ...updatePayload };
+      if (callFull.acceptedAt) {
+        try {
+          const start = new Date(callFull.acceptedAt.replace(' ', 'T')).getTime();
+          const end = new Date(nowStr.replace(' ', 'T')).getTime();
+          const diffSec = Math.max(0, Math.floor((end - start) / 1000));
+          const mins = Math.floor(diffSec / 60);
+          const secs = diffSec % 60;
+          durationText = `${mins}m ${secs}s`;
+        } catch (e) {
+          console.error("Error calculating duration:", e);
+        }
+      } else {
+        durationText = 'no contestada';
+      }
+
+      // Add call log to chat conversation
+      sendChatMessage(
+        call.senderId,
+        call.senderName,
+        call.senderRole,
+        `📞 ${callTypeName} finalizada. Duración: ${durationText}`,
+        call.receiverId
+      );
     }
   }
 }

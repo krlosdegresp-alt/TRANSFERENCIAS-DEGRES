@@ -25,6 +25,7 @@ import {
   AlertCircle,
   User as UserIcon,
   Video,
+  Phone,
   Check,
   Edit,
   Undo2
@@ -384,29 +385,58 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
               ))}
             </select>
             {selectedThread !== 'general' && currentUser.role !== 'Cajera' && (
-              <button
-                type="button"
-                onClick={async () => {
-                  const targetUser = allowedRecipients.find(r => r.id === selectedThread);
-                  if (targetUser) {
-                    try {
-                      await startVideoCall(
-                        currentUser.id,
-                        currentUser.nombre,
-                        currentUser.role,
-                        targetUser.id,
-                        targetUser.nombre
-                      );
-                    } catch (e) {
-                      console.error("Error starting video call:", e);
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const targetUser = allowedRecipients.find(r => r.id === selectedThread);
+                    if (targetUser) {
+                      try {
+                        await startVideoCall(
+                          currentUser.id,
+                          currentUser.nombre,
+                          currentUser.role,
+                          targetUser.id,
+                          targetUser.nombre,
+                          undefined,
+                          'voice'
+                        );
+                      } catch (e) {
+                        console.error("Error starting voice call:", e);
+                      }
                     }
-                  }
-                }}
-                className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0"
-                title="Llamar por Google Meet"
-              >
-                <Video className="h-4 w-4" />
-              </button>
+                  }}
+                  className="p-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center"
+                  title="Llamada de voz"
+                >
+                  <Phone className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const targetUser = allowedRecipients.find(r => r.id === selectedThread);
+                    if (targetUser) {
+                      try {
+                        await startVideoCall(
+                          currentUser.id,
+                          currentUser.nombre,
+                          currentUser.role,
+                          targetUser.id,
+                          targetUser.nombre,
+                          undefined,
+                          'video'
+                        );
+                      } catch (e) {
+                        console.error("Error starting video call:", e);
+                      }
+                    }
+                  }}
+                  className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center"
+                  title="Videollamada Google Meet"
+                >
+                  <Video className="h-4 w-4" />
+                </button>
+              </div>
             )}
           </div>
 
