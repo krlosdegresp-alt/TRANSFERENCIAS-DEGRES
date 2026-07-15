@@ -28,7 +28,10 @@ import {
   Phone,
   Check,
   Edit,
-  Undo2
+  Undo2,
+  Camera,
+  Image as ImageIcon,
+  Loader2
 } from 'lucide-react';
 
 interface ChatSoporteProps {
@@ -88,6 +91,141 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   const [allUsers, setAllUsers] = useState<User[]>(() => getUsers());
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // Image and Camera state
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Stop camera tracks when unmounting
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  // Utility to compress image to a sensible, firestore-friendly size
+  const compressImage = (base64Str: string, maxWidth = 800, maxHeight = 800, quality = 0.75): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(base64Str);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => {
+        resolve(base64Str);
+      };
+    });
+  };
+
+  const handleStartCamera = async () => {
+    setIsCameraActive(true);
+    setCameraError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Error starting camera stream:", err);
+      setCameraError("Permiso denegado o cámara no disponible.");
+    }
+  };
+
+  const handleStopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraActive(false);
+    setCameraError(null);
+  };
+
+  const handleCapturePhoto = async () => {
+    if (!videoRef.current) return;
+    try {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const rawBase64 = canvas.toDataURL('image/jpeg', 0.85);
+        setIsCompressing(true);
+        const compressed = await compressImage(rawBase64, 600, 600, 0.7);
+        setImagePreview(compressed);
+      }
+    } catch (err) {
+      console.error("Error capturing photo frame:", err);
+    } finally {
+      setIsCompressing(false);
+      handleStopCamera();
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Solo se permiten archivos de imagen.');
+      return;
+    }
+
+    setIsCompressing(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64Str = event.target?.result as string;
+      try {
+        const compressed = await compressImage(base64Str, 800, 800, 0.7);
+        setImagePreview(compressed);
+      } catch (err) {
+        console.error("Error compressing file image:", err);
+      } finally {
+        setIsCompressing(false);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevMessagesLength = useRef(messages.length);
@@ -256,7 +394,11 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim()) return;
+    
+    const messageText = text.trim();
+    const hasImage = !!imagePreview;
+
+    if (!messageText && !hasImage) return;
 
     if (selectedThread === 'general') {
       // Only Admin and Tesorera can write in general announcements channel
@@ -266,15 +408,19 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
       }
     }
 
+    const finalTxt = messageText || (hasImage ? "📷 Imagen Adjunta" : "");
+
     sendChatMessage(
       currentUser.id,
       currentUser.nombre,
       currentUser.role,
-      text,
-      selectedThread
+      finalTxt,
+      selectedThread,
+      imagePreview
     );
 
     setText('');
+    setImagePreview(null);
   };
 
   const handleDeleteMessage = (msgId: string) => {
@@ -681,13 +827,28 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                           );
                         })() : (
                           <div 
-                            className={`rounded-2xl p-3 text-xs leading-relaxed font-medium shadow-sm ${
+                            className={`rounded-2xl p-2 text-xs leading-relaxed font-medium shadow-sm flex flex-col gap-1.5 ${
                               isMe 
                                 ? 'bg-[#1A2D7C] text-white rounded-tr-none' 
                                 : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none'
                             }`}
                           >
-                            {msg.text}
+                            {msg.image && (
+                              <div className="rounded-xl overflow-hidden border border-black/10 max-h-48 cursor-zoom-in bg-black/5 flex items-center justify-center">
+                                <img 
+                                  src={msg.image} 
+                                  alt="Adjunto" 
+                                  className="max-h-48 object-contain hover:scale-[1.02] transition-transform"
+                                  onClick={() => setZoomedImage(msg.image || null)}
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+                            )}
+                            {msg.text && (
+                              <p className={msg.image ? 'px-1 pb-0.5' : ''}>
+                                {msg.text}
+                              </p>
+                            )}
                           </div>
                         )}
 
@@ -716,31 +877,181 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Active live camera feed overlay */}
+          {isCameraActive && (
+            <div className="absolute inset-0 bg-slate-950 flex flex-col z-35 font-sans">
+              <div className="bg-[#1A2D7C] p-3 text-white flex justify-between items-center border-b border-white/10 shrink-0">
+                <span className="text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-red-600 animate-ping"></span>
+                  Cámara en Vivo
+                </span>
+                <button 
+                  type="button" 
+                  onClick={handleStopCamera} 
+                  className="p-1.5 bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
+                {cameraError ? (
+                  <div className="text-center p-4 space-y-2.5">
+                    <AlertCircle className="h-8 w-8 text-rose-500 mx-auto" />
+                    <p className="text-xs text-rose-500 font-bold">{cameraError}</p>
+                    <p className="text-[9.5px] text-slate-400 leading-normal max-w-xs font-medium">
+                      Concede permisos de cámara en tu navegador para capturar fotos directamente.
+                    </p>
+                  </div>
+                ) : (
+                  <video 
+                    ref={videoRef} 
+                    autoPlay 
+                    playsInline 
+                    className="w-full h-full object-cover"
+                  />
+                )}
+              </div>
+              <div className="p-3 bg-slate-900 flex justify-center gap-2.5 shrink-0">
+                {!cameraError && (
+                  <button
+                    type="button"
+                    onClick={handleCapturePhoto}
+                    className="px-4 py-2 bg-[#F47920] hover:bg-amber-600 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-lg shadow-lg transition-all cursor-pointer"
+                  >
+                    Tomar Foto
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleStopCamera}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-lg transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Image preview before sending */}
+          {imagePreview && (
+            <div className="px-3.5 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0 font-sans">
+              <div className="flex items-center gap-2.5">
+                <div className="relative h-11 w-11 rounded-lg overflow-hidden border border-slate-300 bg-white shadow-sm flex items-center justify-center">
+                  <img src={imagePreview} alt="Vista previa" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setImagePreview(null)}
+                    className="absolute top-0.5 right-0.5 p-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-md cursor-pointer"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+                <div>
+                  <p className="text-[9.5px] font-black text-slate-700 uppercase tracking-wide">Imagen seleccionada</p>
+                  <p className="text-[9px] text-slate-450 font-medium">Añade texto o pulsa enviar</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImagePreview(null)}
+                className="text-[9.5px] font-black uppercase text-rose-600 hover:text-rose-700 bg-rose-50 border border-rose-150 rounded-lg px-2 py-1 transition-all cursor-pointer"
+              >
+                Quitar
+              </button>
+            </div>
+          )}
+
           {/* Input Footer */}
-          <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-slate-200 flex gap-2 shrink-0 font-sans">
-            <input
-              type="text"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={isWriteLocked ? "Anuncios exclusivos para administradores" : "Escribe un mensaje de soporte..."}
-              disabled={isWriteLocked}
-              className={`flex-1 text-xs font-bold p-2.5 border border-slate-300 rounded-xl focus:outline-none focus:border-[#1A2D7C] placeholder:text-slate-400 placeholder:font-normal ${
-                isWriteLocked ? 'bg-slate-50 border-dashed border-slate-250 cursor-not-allowed' : ''
-              }`}
-            />
-            <button
-              type="submit"
-              disabled={isWriteLocked}
-              className={`p-2.5 rounded-xl transition-all shadow flex items-center justify-center shrink-0 ${
-                isWriteLocked 
-                  ? 'bg-slate-300 text-slate-400 cursor-not-allowed' 
-                  : 'bg-[#1A2D7C] hover:bg-indigo-950 text-white cursor-pointer'
-              }`}
-            >
-              <Send className="h-4.5 w-4.5 text-white" />
-            </button>
+          <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-slate-200 flex flex-col gap-2 shrink-0 font-sans">
+            {!isWriteLocked && (
+              <div className="flex gap-2 items-center justify-start pb-1">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-[#1A2D7C] border border-slate-200 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                  title="Subir imagen desde galería"
+                >
+                  <ImageIcon className="h-3.5 w-3.5 text-slate-500" />
+                  <span className="text-[9px] font-bold uppercase tracking-wider">Subir Foto</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartCamera}
+                  className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-[#1A2D7C] border border-slate-200 rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                  title="Tomar foto con la cámara"
+                >
+                  <Camera className="h-3.5 w-3.5 text-slate-500" />
+                  <span className="text-[9px] font-bold uppercase tracking-wider">Cámara</span>
+                </button>
+                {isCompressing && (
+                  <span className="flex items-center gap-1 text-[9px] text-slate-400 animate-pulse font-bold">
+                    <Loader2 className="h-3 w-3 animate-spin text-indigo-600" />
+                    Procesando...
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={isWriteLocked ? "Anuncios exclusivos para administradores" : "Escribe un mensaje de soporte..."}
+                disabled={isWriteLocked}
+                className={`flex-1 text-xs font-bold p-2.5 border border-slate-300 rounded-xl focus:outline-none focus:border-[#1A2D7C] placeholder:text-slate-400 placeholder:font-normal ${
+                  isWriteLocked ? 'bg-slate-50 border-dashed border-slate-250 cursor-not-allowed' : ''
+                }`}
+              />
+              <button
+                type="submit"
+                disabled={isWriteLocked}
+                className={`p-2.5 rounded-xl transition-all shadow flex items-center justify-center shrink-0 ${
+                  isWriteLocked 
+                    ? 'bg-slate-300 text-slate-400 cursor-not-allowed' 
+                    : 'bg-[#1A2D7C] hover:bg-indigo-950 text-white cursor-pointer'
+                }`}
+              >
+                <Send className="h-4.5 w-4.5 text-white" />
+              </button>
+            </div>
           </form>
 
+        </div>
+      )}
+
+      {/* Lightbox Zoom Modal */}
+      {zoomedImage && (
+        <div 
+          className="fixed inset-0 bg-black/95 z-[9999] flex flex-col items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setZoomedImage(null)}
+        >
+          <button
+            type="button"
+            className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer"
+            onClick={() => setZoomedImage(null)}
+          >
+            <X className="h-6 w-6" />
+          </button>
+          
+          <div className="max-w-4xl max-h-[85vh] overflow-hidden rounded-2xl border border-white/10 shadow-2xl flex items-center justify-center">
+            <img 
+              src={zoomedImage} 
+              alt="Adjunto ampliado" 
+              className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          
+          <p className="text-white/60 text-xs font-bold uppercase tracking-widest mt-4 font-sans">Haz clic fuera de la imagen para cerrar</p>
         </div>
       )}
 

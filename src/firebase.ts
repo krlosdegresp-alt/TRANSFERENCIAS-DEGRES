@@ -13,7 +13,7 @@ import {
   deleteField 
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall } from './types';
+import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall, ReportConfig } from './types';
 import { getColombiaDateTime } from './utils/formato';
 
 // Firebase configuration from firebase-applet-config.json
@@ -54,6 +54,7 @@ const STORAGE_CIERRES_KEY = 'transf_cierres_caja';
 const STORAGE_BATCHES_KEY = 'transf_upload_batches';
 const STORAGE_CHAT_KEY = 'transferencias_chat_messages';
 const STORAGE_VIDEOCALLS_KEY = 'transferencias_videocalls';
+const STORAGE_REPORT_CONFIG_KEY = 'transf_report_config';
 
 // Initial mockup data for transactions so that the dashboard doesn't start completely blank if no data is in cloud
 const INITIAL_TRANSACTIONS: Transaction[] = [
@@ -279,6 +280,23 @@ export function initializeRealtimeListeners() {
     callsList.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
     localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(callsList));
+    notifyListeners();
+  });
+
+  // 8. Reports config listener
+  onSnapshot(doc(db, 'configs', 'reports'), (docSnap) => {
+    if (docSnap.exists()) {
+      localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(docSnap.data()));
+    } else {
+      const defaultConfig: ReportConfig = {
+        id: 'cajera_reports_visibility',
+        showSumaConsolidada: true,
+        showEficaciaConciliaria: true,
+        showParticipacionSede: false,
+        showRendimientoAsesores: true
+      };
+      localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(defaultConfig));
+    }
     notifyListeners();
   });
 }
@@ -1145,7 +1163,7 @@ export function getChatMessages(): ChatMessage[] {
   }
 }
 
-export function sendChatMessage(senderId: string, senderName: string, senderRole: Role, text: string, receiverId?: string | null): ChatMessage {
+export function sendChatMessage(senderId: string, senderName: string, senderRole: Role, text: string, receiverId?: string | null, image?: string | null): ChatMessage {
   const messages = getChatMessages();
   const id = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
   const newMessage: ChatMessage = {
@@ -1155,7 +1173,8 @@ export function sendChatMessage(senderId: string, senderName: string, senderRole
     senderRole,
     receiverId: receiverId || null,
     text,
-    timestamp: getColombiaDateTime().dateTimeStr
+    timestamp: getColombiaDateTime().dateTimeStr,
+    image: image || null
   };
   messages.push(newMessage);
   localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(messages));
@@ -1306,5 +1325,31 @@ export async function updateVideoCallStatus(callId: string, status: 'accepted' |
       );
     }
   }
+}
+
+export function getReportConfig(): ReportConfig {
+  const data = localStorage.getItem(STORAGE_REPORT_CONFIG_KEY);
+  const defaultConfig: ReportConfig = {
+    id: 'cajera_reports_visibility',
+    showSumaConsolidada: true,
+    showEficaciaConciliaria: true,
+    showParticipacionSede: false,
+    showRendimientoAsesores: true
+  };
+  if (!data) return defaultConfig;
+  try {
+    return { ...defaultConfig, ...JSON.parse(data) } as ReportConfig;
+  } catch (e) {
+    return defaultConfig;
+  }
+}
+
+export async function updateReportConfig(config: Partial<ReportConfig>): Promise<void> {
+  const current = getReportConfig();
+  const updated = { ...current, ...config };
+  localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(updated));
+  notifyListeners();
+
+  await setDoc(doc(db, 'configs', 'reports'), updated, { merge: true });
 }
 

@@ -176,7 +176,7 @@ export default function App() {
                 />
               )}
               {activeTab === 'reportes' && (
-                <Reportes transactions={transactions} currentUser={currentUser} />
+                <Reportes transactions={transactions} currentUser={currentUser} onRefreshData={handleRefreshData} />
               )}
               {activeTab === 'admin' && (
                 <AdminPanel 

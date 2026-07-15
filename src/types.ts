@@ -81,6 +81,7 @@ export interface ChatMessage {
   receiverId?: string | null; // Specific recipient or 'all_admins'
   text: string;
   timestamp: string;
+  image?: string | null;
 }
 
 export interface VideoCall {
@@ -96,6 +97,14 @@ export interface VideoCall {
   type?: 'video' | 'voice';
   acceptedAt?: string;
   endedAt?: string;
+}
+
+export interface ReportConfig {
+  id: string;
+  showSumaConsolidada: boolean;
+  showEficaciaConciliaria: boolean;
+  showParticipacionSede: boolean;
+  showRendimientoAsesores: boolean;
 }
 
 

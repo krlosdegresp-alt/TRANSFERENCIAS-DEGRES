@@ -1,8 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Transaction, Sede, User } from '../types';
+import { Transaction, Sede, User, ReportConfig } from '../types';
 import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h } from '../utils/formato';
-import { getAdvisors, getCierresCaja } from '../firebase';
+import { 
+  getAdvisors, 
+  getCierresCaja, 
+  registrarCierreCaja, 
+  solicitarDesbloqueoCierre, 
+  aprobarDesbloqueoCierre, 
+  rechazarDesbloqueoCierre,
+  getReportConfig,
+  updateReportConfig,
+  subscribeToDatabase
+} from '../firebase';
 import { 
   BarChart3, 
   Calendar, 
@@ -15,16 +25,40 @@ import {
   Search,
   Lock,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  CheckCircle2,
+  Receipt,
+  Unlock,
+  Send,
+  AlertTriangle,
+  Check,
+  XCircle,
+  Clock,
+  ArrowLeftRight,
+  Settings,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface ReportesProps {
   transactions: Transaction[];
   currentUser: User;
+  onRefreshData?: () => void;
 }
 
-export default function Reportes({ transactions, currentUser }: ReportesProps) {
+export default function Reportes({ transactions, currentUser, onRefreshData }: ReportesProps) {
   const todayStr = getColombiaDateTime().dateStr;
+
+  // Report Config State (Toggled by Admins)
+  const [reportConfig, setReportConfig] = useState<ReportConfig>(() => getReportConfig());
+
+  useEffect(() => {
+    setReportConfig(getReportConfig());
+    const unsubscribe = subscribeToDatabase(() => {
+      setReportConfig(getReportConfig());
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Filters State
   const [startDate, setStartDate] = useState(''); // start with empty to auto-detect once active transactions loaded
@@ -34,6 +68,81 @@ export default function Reportes({ transactions, currentUser }: ReportesProps) {
   );
   const [minVal, setMinVal] = useState('');
   const [maxVal, setMaxVal] = useState('');
+
+  // --- States for Daily Cash Closing ---
+  const [cierreFecha, setCierreFecha] = useState(todayStr);
+  const [cierreSede, setCierreSede] = useState<Sede>(
+    currentUser.role === 'Cajera' && currentUser.sede ? currentUser.sede : 'Guayabal'
+  );
+  const [motivoDesbloqueoLocal, setMotivoDesbloqueoLocal] = useState('');
+  const [mostrarFormSolicitud, setMostrarFormSolicitud] = useState(false);
+
+  // Fetch all cierres
+  const activeCierres = getCierresCaja();
+  const currentCierre = activeCierres.find(c => c.fecha === cierreFecha && c.sede === cierreSede);
+  const isAlreadyClosed = !!currentCierre;
+
+  // Let's calculate:
+  // 1. Total Bancos for selected closure date & branch
+  const totalBancoCierre = transactions.filter(
+    t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
+  ).reduce((sum, tx) => sum + tx.valor, 0);
+
+  // 2. Total Identified (Conciliado) for selected closure date & branch
+  const totalIdentificadoCierre = transactions.filter(
+    t => t.fecha === cierreFecha && t.sede === cierreSede && t.identificada && !t.esHistorico
+  ).reduce((sum, tx) => sum + tx.valor, 0);
+
+  // 3. Number of identified transactions
+  const numIdentificadosCierre = transactions.filter(
+    t => t.fecha === cierreFecha && t.sede === cierreSede && t.identificada && !t.esHistorico
+  ).length;
+
+  // 4. Number of pending transactions
+  const numPendientesCierre = transactions.filter(
+    t => t.fecha === cierreFecha && t.sede === cierreSede && !t.identificada && !t.esHistorico
+  ).length;
+
+  // The difference/descuadre is totalIdentificadoCierre - totalBancoCierre
+  const diferenciaCierre = totalIdentificadoCierre - totalBancoCierre;
+
+  const handleGuardarCierre = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isAlreadyClosed) return;
+
+    registrarCierreCaja(cierreFecha, cierreSede, currentUser.nombre, totalIdentificadoCierre);
+    alert(`¡Cierre de Caja Registrado y Bloqueado exitosamente!\nFecha: ${cierreFecha}\nSede: ${cierreSede}\nMonto Identificado: ${formatCOP(totalIdentificadoCierre)}`);
+    if (onRefreshData) onRefreshData();
+  };
+
+  const handleSolicitarDesbloqueo = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!motivoDesbloqueoLocal.trim()) {
+      alert('Por favor, indique la razón para solicitar el desbloqueo.');
+      return;
+    }
+    solicitarDesbloqueoCierre(cierreFecha, cierreSede, motivoDesbloqueoLocal, currentUser.nombre);
+    setMotivoDesbloqueoLocal('');
+    setMostrarFormSolicitud(false);
+    alert('Se ha enviado la solicitud de desbloqueo al administrador.');
+    if (onRefreshData) onRefreshData();
+  };
+
+  const handleAprobarDesbloqueo = () => {
+    if (confirm(`¿Está seguro de desbloquear el cierre de caja para la Sede ${cierreSede} en la fecha ${cierreFecha}? Se eliminará el registro de cierre actual.`)) {
+      aprobarDesbloqueoCierre(cierreFecha, cierreSede, currentUser.nombre);
+      alert('El cierre de caja ha sido desbloqueado y eliminado.');
+      if (onRefreshData) onRefreshData();
+    }
+  };
+
+  const handleRechazarDesbloqueo = () => {
+    if (confirm(`¿Está seguro de rechazar la solicitud de desbloqueo para la Sede ${cierreSede} en la fecha ${cierreFecha}?`)) {
+      rechazarDesbloqueoCierre(cierreFecha, cierreSede, currentUser.nombre);
+      alert('La solicitud de desbloqueo ha sido rechazada.');
+      if (onRefreshData) onRefreshData();
+    }
+  };
 
   // Advisor Specific Filters and Variables
   const [asesorDate, setAsesorDate] = useState('');
@@ -563,6 +672,9 @@ export default function Reportes({ transactions, currentUser }: ReportesProps) {
     );
   }
 
+  const showBranchCard = currentUser.role !== 'Cajera' || reportConfig.showParticipacionSede;
+  const showAdvisorsCard = currentUser.role !== 'Cajera' || reportConfig.showRendimientoAsesores;
+
   return (
     <div id="reportes-module" className="p-6 md:p-10 max-w-7xl mx-auto space-y-6">
       {/* Title */}
@@ -589,6 +701,156 @@ export default function Reportes({ transactions, currentUser }: ReportesProps) {
           </button>
         )}
       </div>
+
+      {/* Admin/Tesorera Report Configuration Panel */}
+      {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
+        <div id="report-visibility-config-panel" className="bg-gradient-to-br from-slate-50 to-slate-100 border-2 border-[#1A2D7C]/20 rounded-2xl p-5 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-[#1A2D7C]/10 text-[#1A2D7C] rounded-xl">
+                <Settings className="h-5 w-5 stroke-[2.5]" />
+              </div>
+              <div>
+                <h3 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] font-space">
+                  CONFIGURACIÓN DE VISIBILIDAD DE CIFRAS (ROL CAJERA)
+                </h3>
+                <p className="text-[10.5px] text-slate-500 font-medium">
+                  Activa o desactiva qué cuadros informativos y estadísticas puede ver el rol de <strong>Cajera</strong> en su sección de reportes.
+                </p>
+              </div>
+            </div>
+            <span className="bg-[#1A2D7C] text-white text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded font-mono shadow-sm">
+              Panel de Control Admin
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* SUMA CONSOLIDADA */}
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">Suma Consolidada</span>
+                  {reportConfig.showSumaConsolidada ? (
+                    <Eye className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5 text-rose-500" />
+                  )}
+                </div>
+                <p className="text-[9.5px] text-slate-450 leading-relaxed font-medium">
+                  Total de los abonos sumados bajo filtros activos en la sede de la cajera.
+                </p>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500">Estado</span>
+                <button
+                  type="button"
+                  onClick={() => updateReportConfig({ showSumaConsolidada: !reportConfig.showSumaConsolidada })}
+                  className={`px-2.5 py-1 text-[9.5px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    reportConfig.showSumaConsolidada
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  {reportConfig.showSumaConsolidada ? 'Activado' : 'Desactivado'}
+                </button>
+              </div>
+            </div>
+
+            {/* RECONCILIATION RATE */}
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">Eficacia Conciliaria</span>
+                  {reportConfig.showEficaciaConciliaria ? (
+                    <Eye className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5 text-rose-500" />
+                  )}
+                </div>
+                <p className="text-[9.5px] text-slate-450 leading-relaxed font-medium">
+                  Tasa porcentual y contador de conciliación de la sede de la cajera.
+                </p>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500">Estado</span>
+                <button
+                  type="button"
+                  onClick={() => updateReportConfig({ showEficaciaConciliaria: !reportConfig.showEficaciaConciliaria })}
+                  className={`px-2.5 py-1 text-[9.5px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    reportConfig.showEficaciaConciliaria
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  {reportConfig.showEficaciaConciliaria ? 'Activado' : 'Desactivado'}
+                </button>
+              </div>
+            </div>
+
+            {/* PARTICIPACION POR SEDE */}
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">Participación por Sede</span>
+                  {reportConfig.showParticipacionSede ? (
+                    <Eye className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5 text-rose-500" />
+                  )}
+                </div>
+                <p className="text-[9.5px] text-slate-450 leading-relaxed font-medium">
+                  Gráfico de barras comparando volúmenes entre sedes físicas.
+                </p>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500">Estado</span>
+                <button
+                  type="button"
+                  onClick={() => updateReportConfig({ showParticipacionSede: !reportConfig.showParticipacionSede })}
+                  className={`px-2.5 py-1 text-[9.5px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    reportConfig.showParticipacionSede
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  {reportConfig.showParticipacionSede ? 'Activado' : 'Desactivado'}
+                </button>
+              </div>
+            </div>
+
+            {/* RENDIMIENTO DE ASESORES */}
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">Rendimiento Asesores</span>
+                  {reportConfig.showRendimientoAsesores ? (
+                    <Eye className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5 text-rose-500" />
+                  )}
+                </div>
+                <p className="text-[9.5px] text-slate-450 leading-relaxed font-medium">
+                  Tabla de clasificación y recaudos de cada asesor de la sede.
+                </p>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500">Estado</span>
+                <button
+                  type="button"
+                  onClick={() => updateReportConfig({ showRendimientoAsesores: !reportConfig.showRendimientoAsesores })}
+                  className={`px-2.5 py-1 text-[9.5px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    reportConfig.showRendimientoAsesores
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  {reportConfig.showRendimientoAsesores ? 'Activado' : 'Desactivado'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter panel */}
       <div className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm">
@@ -700,184 +962,469 @@ export default function Reportes({ transactions, currentUser }: ReportesProps) {
         </div>
 
         {/* Consolidado Filtrado KPI */}
-        <div id="kpi-consolidated-filtered" className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[10px] uppercase font-black tracking-widest font-space">BAJO FILTROS ACTIVOS</span>
-              <DollarSign className="h-4.5 w-4.5 text-[#1A2D7C] stroke-[2.5]" />
+        {(currentUser.role !== 'Cajera' || reportConfig.showSumaConsolidada) && (
+          <div id="kpi-consolidated-filtered" className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[10px] uppercase font-black tracking-widest font-space">BAJO FILTROS ACTIVOS</span>
+                <DollarSign className="h-4.5 w-4.5 text-[#1A2D7C] stroke-[2.5]" />
+              </div>
+              <h4 className="text-lg font-black uppercase italic font-space text-slate-900 mt-1">Suma Consolidada</h4>
+              <p className="text-[10px] text-slate-400 mt-0.5">Suma de las transferencias listadas</p>
             </div>
-            <h4 className="text-lg font-black uppercase italic font-space text-slate-900 mt-1">Suma Consolidada</h4>
-            <p className="text-[10px] text-slate-400 mt-0.5">Suma de las transferencias listadas</p>
-          </div>
 
-          <div className="my-4">
-            <span className="text-3xl font-black text-[#1A2D7C] font-space block leading-none">
-              {formatCOP(totalFilteredValue)}
-            </span>
-            <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-200 text-[10px] uppercase tracking-wider font-bold font-space">
-              <div>
-                <span className="text-emerald-600 block">Identificados</span>
-                <span className="font-mono text-slate-700">{formatCOP(totalFilteredIdentified)}</span>
-              </div>
-              <div>
-                <span className="text-[#F47920] block">Pendientes</span>
-                <span className="font-mono text-slate-700">{formatCOP(totalFilteredPending)}</span>
+            <div className="my-4">
+              <span className="text-3xl font-black text-[#1A2D7C] font-space block leading-none">
+                {formatCOP(totalFilteredValue)}
+              </span>
+              <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-200 text-[10px] uppercase tracking-wider font-bold font-space">
+                <div>
+                  <span className="text-emerald-600 block">Identificados</span>
+                  <span className="font-mono text-slate-700">{formatCOP(totalFilteredIdentified)}</span>
+                </div>
+                <div>
+                  <span className="text-[#F47920] block">Pendientes</span>
+                  <span className="font-mono text-slate-700">{formatCOP(totalFilteredPending)}</span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* reconciliation rate KPI */}
-        <div id="kpi-reconciliation-rate" className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[10px] uppercase font-black tracking-widest font-space">EFICACIA CONCILIARIA</span>
-              <FileCheck className="h-4.5 w-4.5 text-emerald-500 stroke-[2.5]" />
+        {(currentUser.role !== 'Cajera' || reportConfig.showEficaciaConciliaria) && (
+          <div id="kpi-reconciliation-rate" className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-slate-400">
+                <span className="text-[10px] uppercase font-black tracking-widest font-space">EFICACIA CONCILIARIA</span>
+                <FileCheck className="h-4.5 w-4.5 text-emerald-500 stroke-[2.5]" />
+              </div>
+              <h4 className="text-lg font-black uppercase italic font-space text-slate-900 mt-1">Sincronización</h4>
+              <p className="text-[10px] text-slate-400 mt-0.5">Porcentaje de transacciones identificadas</p>
             </div>
-            <h4 className="text-lg font-black uppercase italic font-space text-slate-900 mt-1">Sincronización</h4>
-            <p className="text-[10px] text-slate-400 mt-0.5">Porcentaje de transacciones identificadas</p>
-          </div>
 
-          <div className="my-4">
-            <div className="flex items-baseline gap-2">
-              <span className="text-4xl font-black text-emerald-600 font-space leading-none">{pctIdentified}%</span>
-              <span className="text-xs text-slate-500 uppercase tracking-wider font-black font-space">({countIdentified} de {countFiltered})</span>
-            </div>
-            
-            {/* Visual Progress bar */}
-            <div className="w-full h-3 bg-slate-100 rounded-full mt-4 overflow-hidden border border-slate-200">
-              <div 
-                className="h-full bg-emerald-500 rounded-full transition-all duration-500" 
-                style={{ width: `${pctIdentified}%` }}
-              ></div>
+            <div className="my-4">
+              <div className="flex items-baseline gap-2">
+                <span className="text-4xl font-black text-emerald-600 font-space leading-none">{pctIdentified}%</span>
+                <span className="text-xs text-slate-500 uppercase tracking-wider font-black font-space">({countIdentified} de {countFiltered})</span>
+              </div>
+              
+              {/* Visual Progress bar */}
+              <div className="w-full h-3 bg-slate-100 rounded-full mt-4 overflow-hidden border border-slate-200">
+                <div 
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500" 
+                  style={{ width: `${pctIdentified}%` }}
+                ></div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
       </div>
+
+      {/* Diligenciar Cierre de Caja Section */}
+      {(currentUser.role === 'Cajera' || currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
+        <div id="section-cierre-caja" className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-100 pb-4 gap-4">
+            <div>
+              <h3 className="text-sm font-black text-[#1A2D7C] uppercase font-space tracking-wider flex items-center gap-2">
+                <span className="flex h-2.5 w-2.5 rounded-full bg-[#F47920] animate-pulse"></span>
+                Diligenciar Cierre de Caja Diario (Pagos Electrónicos)
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Registra y bloquea el cuadre de caja diario comparando el total en banco con el monto conciliado/identificado.
+              </p>
+            </div>
+            {isAlreadyClosed && (
+              <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded bg-rose-50 border border-rose-200 text-rose-800 font-mono flex items-center gap-1.5">
+                <Lock className="h-3.5 w-3.5 text-rose-600 stroke-[2.5]" />
+                Cierre Guardado & Bloqueado
+              </span>
+            )}
+          </div>
+
+          <form onSubmit={handleGuardarCierre} className="grid lg:grid-cols-12 gap-6 items-start">
+            
+            {/* Inputs Panel */}
+            <div className="lg:col-span-7 grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Fecha de Cierre</label>
+                <input
+                  id="cierre-fecha-input"
+                  type="date"
+                  required
+                  value={cierreFecha}
+                  onChange={(e) => setCierreFecha(e.target.value)}
+                  className="w-full text-xs font-bold border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:bg-white focus:outline-none focus:border-[#1A2D7C]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1.5 uppercase tracking-wider">Sede Física</label>
+                {currentUser.role === 'Cajera' ? (
+                  <div className="w-full text-xs border border-slate-200 rounded-xl p-2.5 bg-slate-100 text-slate-600 font-bold uppercase tracking-wider flex items-center gap-1">
+                    <Lock className="h-3.5 w-3.5 text-[#1A2D7C]" />
+                    <span>Sede: {cierreSede} (Asignada)</span>
+                  </div>
+                ) : (
+                  <select
+                    id="cierre-sede-select"
+                    value={cierreSede}
+                    onChange={(e) => setCierreSede(e.target.value as Sede)}
+                    className="w-full text-xs font-bold border border-slate-200 rounded-xl p-2.5 bg-white focus:outline-none focus:border-[#1A2D7C] uppercase tracking-wider"
+                  >
+                    <option value="Guayabal">Guayabal (6519)</option>
+                    <option value="Sabaneta">Sabaneta (0916)</option>
+                    <option value="Naranjal">Naranjal (6807)</option>
+                    <option value="Desconocida">Otra / Sin Sede</option>
+                  </select>
+                )}
+              </div>
+
+              <div className="sm:col-span-2 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+                <span className="block text-[10px] font-black text-[#1A2D7C] uppercase tracking-wider mb-1">
+                  Monto Conciliado Identificado (Autocompletado)
+                </span>
+                <span className="text-2xl font-black text-slate-900 font-mono block">
+                  {formatCOP(totalIdentificadoCierre)}
+                </span>
+                <p className="text-[10.5px] text-slate-500 mt-1.5 leading-normal">
+                  Suma total de los abonos identificados con documento y asesor para esta fecha y sede. <strong>Solo se guardará lo que ha sido identificado.</strong>
+                </p>
+                <div className="mt-2.5 flex items-center gap-3 text-[10.5px] font-bold text-slate-600">
+                  <span className="bg-emerald-100 text-emerald-850 px-2 py-0.5 rounded text-[9.5px] uppercase tracking-wider font-black">
+                    {numIdentificadosCierre} Identificados
+                  </span>
+                  <span className="bg-amber-100 text-amber-850 px-2 py-0.5 rounded text-[9.5px] uppercase tracking-wider font-black">
+                    {numPendientesCierre} Pendientes
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Verification Tally Panel */}
+            <div className="lg:col-span-5 bg-slate-50 border border-slate-200 p-5 rounded-2xl flex flex-col justify-between self-stretch">
+              <div className="space-y-3.5">
+                <h4 className="text-[10px] uppercase font-black text-slate-450 tracking-widest font-space border-b border-slate-200 pb-2 flex items-center gap-1">
+                  <Building2 className="h-3 w-3 text-[#F47920]" />
+                  RESULTADO DEL CUADRE DE CAJA
+                </h4>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500 font-medium font-space uppercase text-[10px]">Total Recibido en Banco:</span>
+                    <span className="font-mono font-bold text-slate-800">{formatCOP(totalBancoCierre)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500 font-medium font-space uppercase text-[10px]">Total Identificado (Guardado):</span>
+                    <span className="font-mono font-bold text-slate-850">{formatCOP(totalIdentificadoCierre)}</span>
+                  </div>
+                  
+                  <div className="pt-2 border-t border-slate-200 flex justify-between items-baseline">
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wide font-space text-[10px]">Diferencia (Faltante por Identificar):</span>
+                    <span className={`text-sm font-black font-mono ${
+                      diferenciaCierre === 0 ? 'text-emerald-600' : 'text-rose-600'
+                    }`}>
+                      {formatCOP(diferenciaCierre)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Status indicator alert */}
+                <div className="pt-1.5">
+                  {diferenciaCierre === 0 ? (
+                    <div className="p-3 bg-emerald-600 text-white rounded-xl text-center text-[11px] font-black uppercase tracking-wider font-space flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="h-4 w-4 text-white" />
+                      Caja Cuadrada Perfectamente
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-rose-50 border border-rose-200 text-rose-850 rounded-xl text-center text-[10.5px] font-black uppercase tracking-wider font-space flex flex-col items-center">
+                      <span>PAGOS PENDIENTES POR IDENTIFICAR</span>
+                      <span className="font-mono mt-0.5 text-xs text-rose-900">Falta identificar {formatCOP(Math.abs(diferenciaCierre))}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 mt-4 border-t border-slate-200 flex flex-col gap-3">
+                <button
+                  id="btn-guardar-cierre-caja"
+                  type="submit"
+                  disabled={isAlreadyClosed}
+                  className={`w-full py-2.5 px-4 rounded-xl text-xs uppercase tracking-widest font-black font-space transition-all flex items-center justify-center gap-2 ${
+                    isAlreadyClosed 
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none border border-slate-300' 
+                      : 'bg-[#1A2D7C] hover:bg-[#1A2D7C]/95 text-white hover:shadow cursor-pointer'
+                  }`}
+                >
+                  {isAlreadyClosed ? (
+                    <>
+                      <Lock className="h-4 w-4 text-slate-500" />
+                      Cierre Guardado & Bloqueado
+                    </>
+                  ) : (
+                    <>
+                      <Receipt className="h-4 w-4 text-white" />
+                      Guardar Cierre de Caja
+                    </>
+                  )}
+                </button>
+
+                {isAlreadyClosed && (
+                  <div className="space-y-3">
+                    {/* CASE A: User is Cajera */}
+                    {currentUser.role === 'Cajera' && (
+                      <div className="border-t border-slate-200 pt-3 text-left">
+                        {currentCierre?.solicitaDesbloqueo ? (
+                          <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5 shadow-sm">
+                            <p className="text-[10.5px] font-bold text-amber-950 flex items-center gap-1.5 font-space uppercase">
+                              <Clock className="h-3.5 w-3.5 text-amber-600 animate-pulse" />
+                              Desbloqueo Solicitado al Admin
+                            </p>
+                            <p className="text-[10.5px] text-amber-850 italic leading-relaxed break-words bg-white/60 p-2 rounded border border-amber-100 font-medium">
+                              "Motivo: {currentCierre.motivoDesbloqueo}"
+                            </p>
+                            <p className="text-[9.5px] text-amber-600 font-medium">
+                              Espera a que un Administrador o Tesorera apruebe tu solicitud de corrección para volver a guardar.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {!mostrarFormSolicitud ? (
+                              <button
+                                type="button"
+                                onClick={() => setMostrarFormSolicitud(true)}
+                                className="w-full py-2.5 px-4 border-2 border-dashed border-[#F47920] hover:bg-[#F47920]/5 text-[#F47920] font-black uppercase text-[10px] tracking-widest rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer hover:shadow-sm"
+                              >
+                                <Unlock className="h-3.5 w-3.5 text-[#F47920]" />
+                                ¿Corregir Error? Solicitar Desbloqueo
+                              </button>
+                            ) : (
+                              <div className="space-y-2 bg-slate-100 p-3.5 rounded-xl border border-slate-200 animate-in fade-in duration-200">
+                                <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">Motivo del Error (Justificación) *</label>
+                                <textarea
+                                  value={motivoDesbloqueoLocal}
+                                  onChange={(e) => setMotivoDesbloqueoLocal(e.target.value)}
+                                  placeholder="Explica detalladamente por qué necesitas desbloquear y corregir el cierre de caja de hoy (por ejemplo: ingresé mal un dígito, olvidé un QR, etc.)...."
+                                  className="w-full text-[11px] font-bold p-2.5 border border-slate-300 rounded-xl bg-white focus:outline-none focus:border-[#F47920] placeholder:text-slate-400 placeholder:font-normal leading-relaxed"
+                                  rows={2}
+                                  required
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setMostrarFormSolicitud(false);
+                                      setMotivoDesbloqueoLocal('');
+                                    }}
+                                    className="flex-1 py-1.5 text-[10px] text-slate-600 bg-white border border-slate-200 rounded-lg font-black uppercase tracking-wider hover:bg-slate-50 cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleSolicitarDesbloqueo}
+                                    className="flex-1 py-1.5 text-[10px] bg-[#F47920] hover:bg-[#F47920]/95 text-white rounded-lg font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm"
+                                  >
+                                    <Send className="h-2.5 w-2.5 text-white" />
+                                    Enviar
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* CASE B: User is Admin or Tesorera */}
+                    {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
+                      <div className="border-t border-slate-200 pt-3 text-left space-y-2.5">
+                        <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-1 font-space">
+                          <Unlock className="h-3.5 w-3.5 text-[#1A2D7C]" />
+                          Controles de Desbloqueo (Admin)
+                        </p>
+
+                        {currentCierre?.solicitaDesbloqueo ? (
+                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2.5">
+                            <p className="text-[10px] font-bold text-amber-950 flex items-center gap-1.5 font-space uppercase">
+                              <AlertTriangle className="h-4 w-4 text-amber-600 animate-pulse" />
+                              Solicitud de Desbloqueo de {currentCierre.nombreCajera}
+                            </p>
+                            <p className="text-[11px] text-amber-950 italic leading-relaxed break-words bg-white/70 p-2.5 rounded-lg border border-amber-100 font-medium">
+                              "{currentCierre.motivoDesbloqueo}"
+                            </p>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={handleRechazarDesbloqueo}
+                                className="flex-1 py-1.5 px-2 text-[9.5px] bg-white text-rose-750 border border-rose-200 hover:bg-rose-50 rounded-lg font-black uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                Rechazar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleAprobarDesbloqueo}
+                                className="flex-1 py-1.5 px-2 text-[9.5px] bg-[#1A2D7C] hover:bg-[#1A2D7C]/95 text-white rounded-lg font-black uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer transition-all shadow-sm"
+                              >
+                                <Check className="h-3.5 w-3.5 text-white" />
+                                Aprobar & Desbloquear
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleAprobarDesbloqueo}
+                            className="w-full py-2 px-3 bg-[#1A2D7C]/10 hover:bg-[#1A2D7C]/20 text-[#1A2D7C] border border-[#1A2D7C]/30 font-black uppercase text-[9.5px] tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer hover:shadow-sm"
+                          >
+                            <Unlock className="h-3.5 w-3.5 text-[#1A2D7C]" />
+                            Desbloquear Cierre Directamente
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+          </form>
+
+        </div>
+      )}
 
       {/* Graphical section / Branch distribution */}
-      <div className="grid lg:grid-cols-12 gap-6">
-        
-        {/* Branch distribution bar density */}
-        <div className="lg:col-span-6 bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-            <h4 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] flex items-center gap-1.5 font-space">
-              <Building2 className="h-4.5 w-4.5 text-[#F47920]" />
-              PARTICIPACIÓN POR SEDE FISICA
-            </h4>
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">FLUJO FILTRADO</span>
-          </div>
-
-          <div className="space-y-4 pt-2">
-            {/* Sede Guayabal Bar */}
-            {(currentUser.role !== 'Cajera' || currentUser.sede === 'Guayabal') && (
-              <div>
-                <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                  <span>Guayabal (***6519)</span>
-                  <span className="font-mono text-slate-800">{formatCOP(guayabalAggr.sum)} ({guayabalAggr.count} txs)</span>
-                </div>
-                <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                  <div 
-                    className="h-full bg-indigo-600"
-                    style={{ width: `${(guayabalAggr.sum / maxBranchVal) * 100}%` }}
-                  ></div>
-                </div>
+      {(showBranchCard || showAdvisorsCard) && (
+        <div className="grid lg:grid-cols-12 gap-6">
+          
+          {/* Branch distribution bar density */}
+          {showBranchCard && (
+            <div className={`${showAdvisorsCard ? 'lg:col-span-6' : 'lg:col-span-12'} bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4`}>
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <h4 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] flex items-center gap-1.5 font-space">
+                  <Building2 className="h-4.5 w-4.5 text-[#F47920]" />
+                  PARTICIPACIÓN POR SEDE FISICA
+                </h4>
+                <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">FLUJO FILTRADO</span>
               </div>
-            )}
 
-            {/* Sede Sabaneta Bar */}
-            {(currentUser.role !== 'Cajera' || currentUser.sede === 'Sabaneta') && (
-              <div>
-                <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                  <span>Sabaneta (***0916)</span>
-                  <span className="font-mono text-slate-800">{formatCOP(sabanetaAggr.sum)} ({sabanetaAggr.count} txs)</span>
-                </div>
-                <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                  <div 
-                    className="h-full bg-orange-500"
-                    style={{ width: `${(sabanetaAggr.sum / maxBranchVal) * 100}%` }}
-                  ></div>
-                </div>
-              </div>
-            )}
+              <div className="space-y-4 pt-2">
+                {/* Sede Guayabal Bar */}
+                {(currentUser.role !== 'Cajera' || currentUser.sede === 'Guayabal') && (
+                  <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                      <span>Guayabal (***6519)</span>
+                      <span className="font-mono text-slate-800">{formatCOP(guayabalAggr.sum)} ({guayabalAggr.count} txs)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                      <div 
+                        className="h-full bg-indigo-600"
+                        style={{ width: `${(guayabalAggr.sum / maxBranchVal) * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
 
-            {/* Sede Naranjal Bar */}
-            {(currentUser.role !== 'Cajera' || currentUser.sede === 'Naranjal') && (
-              <div>
-                <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                  <span>Naranjal (***6807)</span>
-                  <span className="font-mono text-slate-800">{formatCOP(naranjalAggr.sum)} ({naranjalAggr.count} txs)</span>
-                </div>
-                <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                  <div 
-                    className="h-full bg-teal-500"
-                    style={{ width: `${(naranjalAggr.sum / maxBranchVal) * 100}%` }}
-                  ></div>
-                </div>
-              </div>
-            )}
+                {/* Sede Sabaneta Bar */}
+                {(currentUser.role !== 'Cajera' || currentUser.sede === 'Sabaneta') && (
+                  <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                      <span>Sabaneta (***0916)</span>
+                      <span className="font-mono text-slate-800">{formatCOP(sabanetaAggr.sum)} ({sabanetaAggr.count} txs)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                      <div 
+                        className="h-full bg-orange-500"
+                        style={{ width: `${(sabanetaAggr.sum / maxBranchVal) * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
 
-            {/* Unknown source */}
-            {currentUser.role !== 'Cajera' && dscAggr.sum > 0 && (
-              <div>
-                <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                  <span>Sin Sede Definida</span>
-                  <span className="font-mono text-slate-850">{formatCOP(dscAggr.sum)} ({dscAggr.count} txs)</span>
-                </div>
-                <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                  <div 
-                    className="h-full bg-slate-400"
-                    style={{ width: `${(dscAggr.sum / maxBranchVal) * 100}%` }}
-                  ></div>
-                </div>
+                {/* Sede Naranjal Bar */}
+                {(currentUser.role !== 'Cajera' || currentUser.sede === 'Naranjal') && (
+                  <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                      <span>Naranjal (***6807)</span>
+                      <span className="font-mono text-slate-800">{formatCOP(naranjalAggr.sum)} ({naranjalAggr.count} txs)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                      <div 
+                        className="h-full bg-teal-500"
+                        style={{ width: `${(naranjalAggr.sum / maxBranchVal) * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Unknown source */}
+                {currentUser.role !== 'Cajera' && dscAggr.sum > 0 && (
+                  <div>
+                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                      <span>Sin Sede Definida</span>
+                      <span className="font-mono text-slate-850">{formatCOP(dscAggr.sum)} ({dscAggr.count} txs)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                      <div 
+                        className="h-full bg-slate-400"
+                        style={{ width: `${(dscAggr.sum / maxBranchVal) * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Advisers table consolidated */}
+          {showAdvisorsCard && (
+            <div className={`${showBranchCard ? 'lg:col-span-6' : 'lg:col-span-12'} bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4`}>
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <h4 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] flex items-center gap-1.5 font-space">
+                  <Users className="h-4.5 w-4.5 text-[#F47920]" />
+                  RENDIMIENTO DE ASESORES
+                </h4>
+                <span className="text-[10px] uppercase font-bold text-[#F47920] font-mono">CONCILIACIONES</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b-2 border-slate-900 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                      <th className="py-2.5 font-space">Asesor Comercial</th>
+                      <th className="py-2.5 text-center font-space">Pagos Validados</th>
+                      <th className="py-2.5 text-right font-space">Monto Recaudado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {advisorStats.map((adv, i) => (
+                      <tr key={adv.name} className="hover:bg-slate-50">
+                        <td className="py-3 font-space font-bold text-slate-700 flex items-center gap-2">
+                          <span className="text-[10px] font-black bg-slate-150 text-slate-800 rounded h-5.5 w-5.5 flex items-center justify-center border border-slate-300">
+                            {i + 1}
+                          </span>
+                          {adv.name}
+                        </td>
+                        <td className="py-3 text-center text-slate-600 font-mono font-bold text-xs">
+                          {adv.count}
+                        </td>
+                        <td className="py-3 text-right font-bold text-slate-900 font-mono text-sm">
+                          {formatCOP(adv.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
         </div>
-
-        {/* Advisers table consolidated */}
-        <div className="lg:col-span-6 bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-            <h4 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] flex items-center gap-1.5 font-space">
-              <Users className="h-4.5 w-4.5 text-[#F47920]" />
-              RENDIMIENTO DE ASESORES
-            </h4>
-            <span className="text-[10px] uppercase font-bold text-[#F47920] font-mono">CONCILIACIONES</span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b-2 border-slate-900 text-[10px] font-black uppercase text-slate-400 tracking-wider">
-                  <th className="py-2.5 font-space">Asesor Comercial</th>
-                  <th className="py-2.5 text-center font-space">Pagos Validados</th>
-                  <th className="py-2.5 text-right font-space">Monto Recaudado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {advisorStats.map((adv, i) => (
-                  <tr key={adv.name} className="hover:bg-slate-50">
-                    <td className="py-3 font-space font-bold text-slate-700 flex items-center gap-2">
-                      <span className="text-[10px] font-black bg-slate-150 text-slate-800 rounded h-5.5 w-5.5 flex items-center justify-center border border-slate-300">
-                        {i + 1}
-                      </span>
-                      {adv.name}
-                    </td>
-                    <td className="py-3 text-center text-slate-600 font-mono font-bold text-xs">
-                      {adv.count}
-                    </td>
-                    <td className="py-3 text-right font-bold text-slate-900 font-mono text-sm">
-                      {formatCOP(adv.total)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-      </div>
+      )}
     </div>
   );
 }

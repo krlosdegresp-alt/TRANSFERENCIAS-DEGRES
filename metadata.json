@@ -1,6 +1,6 @@
 {
   "name": "Transferencias",
   "description": "Automatización y validación en tiempo real de pagos por transferencia bancaria y QR.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
