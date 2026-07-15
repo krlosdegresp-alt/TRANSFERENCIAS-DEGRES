@@ -105,6 +105,7 @@ export interface ReportConfig {
   showEficaciaConciliaria: boolean;
   showParticipacionSede: boolean;
   showRendimientoAsesores: boolean;
+  showFiltrosConsulta: boolean;
 }
 
 

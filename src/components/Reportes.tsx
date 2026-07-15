@@ -40,6 +40,153 @@ import {
   EyeOff
 } from 'lucide-react';
 
+interface ChartData {
+  name: string;
+  value: number;
+  count: number;
+  color: string;
+}
+
+function CustomBarChart({ data }: { data: ChartData[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="h-48 flex items-center justify-center text-xs font-bold text-slate-400 font-space uppercase">
+        No hay datos para graficar
+      </div>
+    );
+  }
+  const maxVal = Math.max(...data.map(d => d.value), 1);
+  const chartHeight = 150;
+
+  return (
+    <div className="pt-4 space-y-4">
+      <div className="flex items-end justify-around h-48 border-b-2 border-slate-200 px-4 pb-2 relative">
+        {data.map((d) => {
+          const heightPct = (d.value / maxVal) * 100;
+          return (
+            <div key={d.name} className="flex flex-col items-center w-full group relative">
+              {/* Tooltip */}
+              <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] py-1.5 px-3 rounded-lg font-space z-10 pointer-events-none text-center shadow-lg whitespace-nowrap border border-white/10">
+                <span className="font-extrabold block text-amber-400">{d.name}</span>
+                <span className="font-mono">{formatCOP(d.value)}</span>
+                <span className="block text-[8.5px] text-slate-300 font-sans mt-0.5">{d.count} transacciones</span>
+              </div>
+              
+              {/* Animated Column */}
+              <div 
+                className="w-10 sm:w-14 rounded-t-lg cursor-pointer transition-all hover:brightness-105 hover:shadow-lg duration-300 flex items-end justify-center"
+                style={{ 
+                  height: `${Math.max((heightPct / 100) * chartHeight, 10)}px`, 
+                  backgroundColor: d.color 
+                }}
+              >
+                {/* Visual bar stripe top */}
+                <div className="w-full h-1 bg-white/20 rounded-t-lg" />
+              </div>
+              
+              {/* Sede/Advisor label */}
+              <span className="text-[9.5px] font-black text-slate-500 mt-2 font-space uppercase tracking-wider text-center max-w-[80px] truncate" title={d.name}>
+                {d.name}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      
+      {/* Legend */}
+      <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 mt-2">
+        {data.map(d => (
+          <div key={d.name} className="flex items-center gap-1.5 text-[9.5px] font-extrabold uppercase text-slate-600 font-space">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: d.color }} />
+            <span>{d.name}: <span className="font-mono text-slate-800">{formatCOP(d.value)}</span></span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomPieChart({ data }: { data: ChartData[] }) {
+  if (data.length === 0) {
+    return (
+      <div className="h-48 flex items-center justify-center text-xs font-bold text-slate-400 font-space uppercase">
+        No hay datos para graficar
+      </div>
+    );
+  }
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  const r = 38;
+  const circ = 2 * Math.PI * r; // ~238.76
+  
+  let accumulatedPercent = 0;
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-around gap-6 pt-4">
+      {/* SVG Donut */}
+      <div className="relative w-40 h-40 flex-shrink-0">
+        <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+          {/* Base background track */}
+          <circle 
+            cx="50" 
+            cy="50" 
+            r={r} 
+            fill="transparent" 
+            stroke="#f8fafc" 
+            strokeWidth="12" 
+          />
+          {data.map((d) => {
+            const pct = d.value / total;
+            const strokeLength = pct * circ;
+            const strokeOffset = circ - (accumulatedPercent * circ);
+            accumulatedPercent += pct;
+            
+            return (
+              <circle
+                key={d.name}
+                cx="50"
+                cy="50"
+                r={r}
+                fill="transparent"
+                stroke={d.color}
+                strokeWidth="12"
+                strokeDasharray={`${strokeLength} ${circ}`}
+                strokeDashoffset={strokeOffset}
+                strokeLinecap="round"
+                className="transition-all duration-300 hover:stroke-[14] cursor-pointer"
+                style={{ transformOrigin: '50px 50px' }}
+              />
+            );
+          })}
+        </svg>
+        {/* Center label */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <span className="text-[8px] font-black uppercase text-slate-400 font-space tracking-widest">Total Periodo</span>
+          <span className="text-[11px] font-black text-[#1A2D7C] font-mono leading-none mt-1">{formatCOP(total)}</span>
+        </div>
+      </div>
+
+      {/* Legend with percentages */}
+      <div className="flex-1 space-y-1.5 w-full">
+        {data.map(d => {
+          const pct = Math.round((d.value / total) * 100);
+          return (
+            <div key={d.name} className="flex items-center justify-between border-b border-slate-50 pb-1.5 hover:bg-slate-50/80 px-2 py-1 rounded-lg transition-colors">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                <span className="text-[11px] font-black text-slate-700 font-space uppercase truncate">{d.name}</span>
+              </div>
+              <div className="text-right flex-shrink-0 pl-2">
+                <span className="text-[11px] font-black text-[#1A2D7C] font-mono block">{formatCOP(d.value)}</span>
+                <span className="text-[9px] text-slate-400 font-bold font-mono block">{pct}% ({d.count} txs)</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 interface ReportesProps {
   transactions: Transaction[];
   currentUser: User;
@@ -51,6 +198,10 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
 
   // Report Config State (Toggled by Admins)
   const [reportConfig, setReportConfig] = useState<ReportConfig>(() => getReportConfig());
+
+  // View modes for the visual reports section
+  const [sedeViewMode, setSedeViewMode] = useState<'bars' | 'chart_bar' | 'chart_pie'>('bars');
+  const [advisorViewMode, setAdvisorViewMode] = useState<'table' | 'chart_bar' | 'chart_pie'>('table');
 
   useEffect(() => {
     setReportConfig(getReportConfig());
@@ -240,6 +391,27 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
     const sum = list.reduce((acc, curr) => acc + curr.valor, 0);
     return { name: adv, count: list.length, total: sum };
   }).sort((a, b) => b.total - a.total);
+
+  // Formatted dataset for Sede physical participation charts
+  const sedeDataList = [
+    { name: 'Guayabal', value: guayabalAggr.sum, count: guayabalAggr.count, color: '#4f46e5' },
+    { name: 'Sabaneta', value: sabanetaAggr.sum, count: sabanetaAggr.count, color: '#f97316' },
+    { name: 'Naranjal', value: naranjalAggr.sum, count: naranjalAggr.count, color: '#14b8a6' },
+    { name: 'Sin Sede', value: dscAggr.sum, count: dscAggr.count, color: '#94a3b8' }
+  ].filter(item => item.value > 0 && (currentUser.role !== 'Cajera' || item.name === currentUser.sede));
+
+  // Formatted dataset for Advisor performance charts
+  const advisorDataList = advisorStats
+    .filter(adv => adv.total > 0)
+    .map((adv, idx) => {
+      const colors = ['#4f46e5', '#f97316', '#14b8a6', '#06b6d4', '#ec4899', '#8b5cf6', '#eab308'];
+      return {
+        name: adv.name,
+        value: adv.total,
+        count: adv.count,
+        color: colors[idx % colors.length]
+      };
+    });
 
   // Advisor Specific Variables and Filtering Logic
   const advisorsList = getAdvisors();
@@ -724,7 +896,7 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {/* SUMA CONSOLIDADA */}
             <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
               <div className="space-y-1">
@@ -848,87 +1020,120 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
                 </button>
               </div>
             </div>
+
+            {/* FILTROS DE CONSULTA */}
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">Filtros de Consulta</span>
+                  {reportConfig.showFiltrosConsulta ? (
+                    <Eye className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5 text-rose-500" />
+                  )}
+                </div>
+                <p className="text-[9.5px] text-slate-450 leading-relaxed font-medium">
+                  Habilita el panel de selección de fechas, sedes y montos para la cajera.
+                </p>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500">Estado</span>
+                <button
+                  type="button"
+                  onClick={() => updateReportConfig({ showFiltrosConsulta: !reportConfig.showFiltrosConsulta })}
+                  className={`px-2.5 py-1 text-[9.5px] font-black uppercase rounded-lg transition-all cursor-pointer ${
+                    reportConfig.showFiltrosConsulta
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  {reportConfig.showFiltrosConsulta ? 'Activado' : 'Desactivado'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Filter panel */}
-      <div className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm">
-        <h3 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] mb-4 flex items-center gap-2 font-space">
-          <Calendar className="h-4.5 w-4.5 text-[#F47920]" />
-          GENERAL FILTROS DE CONSULTA
-        </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <div>
-            <label className="block text-[10px] font-bold text-slate-600 mb-1">Fecha de Inicio</label>
-            <input
-              id="input-rep-startdate"
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[10px] font-bold text-slate-600 mb-1">Fecha de Fin</label>
-            <input
-              id="input-rep-enddate"
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[10px] font-bold text-slate-600 mb-1">Sede Física</label>
-            {currentUser.role === 'Cajera' ? (
-              <div className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-slate-100 text-slate-600 font-bold uppercase tracking-wider flex items-center gap-1">
-                <Lock className="h-3 w-3 text-[#1A2D7C]" />
-                <span>{currentUser.sede}</span>
-              </div>
-            ) : (
-              <select
-                id="select-rep-sede"
-                value={sedeFilter}
-                onChange={(e) => setSedeFilter(e.target.value as Sede | 'Todas')}
+      {(currentUser.role !== 'Cajera' || reportConfig.showFiltrosConsulta) && (
+        <div className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm animate-in fade-in slide-in-from-top-4 duration-300">
+          <h3 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] mb-4 flex items-center gap-2 font-space">
+            <Calendar className="h-4.5 w-4.5 text-[#F47920]" />
+            GENERAL FILTROS DE CONSULTA
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">Fecha de Inicio</label>
+              <input
+                id="input-rep-startdate"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
                 className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
-              >
-                <option value="Todas">Todas las sedes</option>
-                <option value="Guayabal">Guayabal (***6519)</option>
-                <option value="Sabaneta">Sabaneta (***0916)</option>
-                <option value="Naranjal">Naranjal (***6807)</option>
-                <option value="Desconocida">Sedes Desconocidas</option>
-              </select>
-            )}
-          </div>
+              />
+            </div>
 
-          <div>
-            <label className="block text-[10px] font-bold text-slate-600 mb-1">Valor Mínimo COP</label>
-            <input
-              id="input-rep-minval"
-              type="number"
-              placeholder="Ej: 50000"
-              value={minVal}
-              onChange={(e) => setMinVal(e.target.value)}
-              className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
-            />
-          </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">Fecha de Fin</label>
+              <input
+                id="input-rep-enddate"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
+              />
+            </div>
 
-          <div>
-            <label className="block text-[10px] font-bold text-slate-600 mb-1">Valor Máximo COP</label>
-            <input
-              id="input-rep-maxval"
-              type="number"
-              placeholder="Ej: 2000000"
-              value={maxVal}
-              onChange={(e) => setMaxVal(e.target.value)}
-              className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
-            />
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">Sede Física</label>
+              {currentUser.role === 'Cajera' ? (
+                <div className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-slate-100 text-slate-600 font-bold uppercase tracking-wider flex items-center gap-1">
+                  <Lock className="h-3 w-3 text-[#1A2D7C]" />
+                  <span>{currentUser.sede}</span>
+                </div>
+              ) : (
+                <select
+                  id="select-rep-sede"
+                  value={sedeFilter}
+                  onChange={(e) => setSedeFilter(e.target.value as Sede | 'Todas')}
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
+                >
+                  <option value="Todas">Todas las sedes</option>
+                  <option value="Guayabal">Guayabal (***6519)</option>
+                  <option value="Sabaneta">Sabaneta (***0916)</option>
+                  <option value="Naranjal">Naranjal (***6807)</option>
+                  <option value="Desconocida">Sedes Desconocidas</option>
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">Valor Mínimo COP</label>
+              <input
+                id="input-rep-minval"
+                type="number"
+                placeholder="Ej: 50000"
+                value={minVal}
+                onChange={(e) => setMinVal(e.target.value)}
+                className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">Valor Máximo COP</label>
+              <input
+                id="input-rep-maxval"
+                type="number"
+                placeholder="Ej: 2000000"
+                value={maxVal}
+                onChange={(e) => setMaxVal(e.target.value)}
+                className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white focus:outline-none focus:border-[#1A2D7C]"
+              />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* KPI Rows */}
       <div className="grid md:grid-cols-3 gap-6">
@@ -1304,76 +1509,134 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
           {/* Branch distribution bar density */}
           {showBranchCard && (
             <div className={`${showAdvisorsCard ? 'lg:col-span-6' : 'lg:col-span-12'} bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4`}>
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-3 gap-2">
                 <h4 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] flex items-center gap-1.5 font-space">
                   <Building2 className="h-4.5 w-4.5 text-[#F47920]" />
                   PARTICIPACIÓN POR SEDE FISICA
                 </h4>
-                <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">FLUJO FILTRADO</span>
+                
+                {/* View Mode Switcher */}
+                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setSedeViewMode('bars')}
+                    className={`px-2 py-1 text-[9.5px] font-black uppercase rounded-md transition-all cursor-pointer ${
+                      sedeViewMode === 'bars'
+                        ? 'bg-[#1A2D7C] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    BARRAS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSedeViewMode('chart_bar')}
+                    className={`px-2 py-1 text-[9.5px] font-black uppercase rounded-md transition-all cursor-pointer ${
+                      sedeViewMode === 'chart_bar'
+                        ? 'bg-[#1A2D7C] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    COLUMNAS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSedeViewMode('chart_pie')}
+                    className={`px-2 py-1 text-[9.5px] font-black uppercase rounded-md transition-all cursor-pointer ${
+                      sedeViewMode === 'chart_pie'
+                        ? 'bg-[#1A2D7C] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    TORTA
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-4 pt-2">
-                {/* Sede Guayabal Bar */}
-                {(currentUser.role !== 'Cajera' || currentUser.sede === 'Guayabal') && (
-                  <div>
-                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                      <span>Guayabal (***6519)</span>
-                      <span className="font-mono text-slate-800">{formatCOP(guayabalAggr.sum)} ({guayabalAggr.count} txs)</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                      <div 
-                        className="h-full bg-indigo-600"
-                        style={{ width: `${(guayabalAggr.sum / maxBranchVal) * 100}%` }}
-                      ></div>
-                    </div>
+              <div className="pt-2">
+                {sedeViewMode === 'bars' && (
+                  <div className="space-y-4 animate-in fade-in duration-300">
+                    {/* Sede Guayabal Bar */}
+                    {(currentUser.role !== 'Cajera' || currentUser.sede === 'Guayabal') && (
+                      <div>
+                        <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                          <span>Guayabal (***6519)</span>
+                          <span className="font-mono text-slate-800">{formatCOP(guayabalAggr.sum)} ({guayabalAggr.count} txs)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                          <div 
+                            className="h-full bg-indigo-600 transition-all duration-500"
+                            style={{ width: `${(guayabalAggr.sum / maxBranchVal) * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sede Sabaneta Bar */}
+                    {(currentUser.role !== 'Cajera' || currentUser.sede === 'Sabaneta') && (
+                      <div>
+                        <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                          <span>Sabaneta (***0916)</span>
+                          <span className="font-mono text-slate-800">{formatCOP(sabanetaAggr.sum)} ({sabanetaAggr.count} txs)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                          <div 
+                            className="h-full bg-orange-500 transition-all duration-500"
+                            style={{ width: `${(sabanetaAggr.sum / maxBranchVal) * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sede Naranjal Bar */}
+                    {(currentUser.role !== 'Cajera' || currentUser.sede === 'Naranjal') && (
+                      <div>
+                        <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                          <span>Naranjal (***6807)</span>
+                          <span className="font-mono text-slate-800">{formatCOP(naranjalAggr.sum)} ({naranjalAggr.count} txs)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                          <div 
+                            className="h-full bg-teal-500 transition-all duration-500"
+                            style={{ width: `${(naranjalAggr.sum / maxBranchVal) * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Unknown source */}
+                    {currentUser.role !== 'Cajera' && dscAggr.sum > 0 && (
+                      <div>
+                        <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
+                          <span>Sin Sede Definida</span>
+                          <span className="font-mono text-slate-850">{formatCOP(dscAggr.sum)} ({dscAggr.count} txs)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
+                          <div 
+                            className="h-full bg-slate-400 transition-all duration-500"
+                            style={{ width: `${(dscAggr.sum / maxBranchVal) * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {sedeDataList.length === 0 && (
+                      <div className="py-8 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">
+                        No hay transacciones registradas en este periodo
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Sede Sabaneta Bar */}
-                {(currentUser.role !== 'Cajera' || currentUser.sede === 'Sabaneta') && (
-                  <div>
-                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                      <span>Sabaneta (***0916)</span>
-                      <span className="font-mono text-slate-800">{formatCOP(sabanetaAggr.sum)} ({sabanetaAggr.count} txs)</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                      <div 
-                        className="h-full bg-orange-500"
-                        style={{ width: `${(sabanetaAggr.sum / maxBranchVal) * 100}%` }}
-                      ></div>
-                    </div>
+                {sedeViewMode === 'chart_bar' && (
+                  <div className="animate-in fade-in duration-300">
+                    <CustomBarChart data={sedeDataList} />
                   </div>
                 )}
 
-                {/* Sede Naranjal Bar */}
-                {(currentUser.role !== 'Cajera' || currentUser.sede === 'Naranjal') && (
-                  <div>
-                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                      <span>Naranjal (***6807)</span>
-                      <span className="font-mono text-slate-800">{formatCOP(naranjalAggr.sum)} ({naranjalAggr.count} txs)</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                      <div 
-                        className="h-full bg-teal-500"
-                        style={{ width: `${(naranjalAggr.sum / maxBranchVal) * 100}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Unknown source */}
-                {currentUser.role !== 'Cajera' && dscAggr.sum > 0 && (
-                  <div>
-                    <div className="flex justify-between text-xs font-bold text-slate-700 mb-1 uppercase tracking-wide font-space">
-                      <span>Sin Sede Definida</span>
-                      <span className="font-mono text-slate-850">{formatCOP(dscAggr.sum)} ({dscAggr.count} txs)</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-3.5 rounded-sm overflow-hidden border border-slate-250">
-                      <div 
-                        className="h-full bg-slate-400"
-                        style={{ width: `${(dscAggr.sum / maxBranchVal) * 100}%` }}
-                      ></div>
-                    </div>
+                {sedeViewMode === 'chart_pie' && (
+                  <div className="animate-in fade-in duration-300">
+                    <CustomPieChart data={sedeDataList} />
                   </div>
                 )}
               </div>
@@ -1383,42 +1646,101 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
           {/* Advisers table consolidated */}
           {showAdvisorsCard && (
             <div className={`${showBranchCard ? 'lg:col-span-6' : 'lg:col-span-12'} bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4`}>
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-3 gap-2">
                 <h4 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] flex items-center gap-1.5 font-space">
                   <Users className="h-4.5 w-4.5 text-[#F47920]" />
                   RENDIMIENTO DE ASESORES
                 </h4>
-                <span className="text-[10px] uppercase font-bold text-[#F47920] font-mono">CONCILIACIONES</span>
+                
+                {/* View Mode Switcher */}
+                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setAdvisorViewMode('table')}
+                    className={`px-2 py-1 text-[9.5px] font-black uppercase rounded-md transition-all cursor-pointer ${
+                      advisorViewMode === 'table'
+                        ? 'bg-[#1A2D7C] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    TABLA
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvisorViewMode('chart_bar')}
+                    className={`px-2 py-1 text-[9.5px] font-black uppercase rounded-md transition-all cursor-pointer ${
+                      advisorViewMode === 'chart_bar'
+                        ? 'bg-[#1A2D7C] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    COLUMNAS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvisorViewMode('chart_pie')}
+                    className={`px-2 py-1 text-[9.5px] font-black uppercase rounded-md transition-all cursor-pointer ${
+                      advisorViewMode === 'chart_pie'
+                        ? 'bg-[#1A2D7C] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    TORTA
+                  </button>
+                </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b-2 border-slate-900 text-[10px] font-black uppercase text-slate-400 tracking-wider">
-                      <th className="py-2.5 font-space">Asesor Comercial</th>
-                      <th className="py-2.5 text-center font-space">Pagos Validados</th>
-                      <th className="py-2.5 text-right font-space">Monto Recaudado</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {advisorStats.map((adv, i) => (
-                      <tr key={adv.name} className="hover:bg-slate-50">
-                        <td className="py-3 font-space font-bold text-slate-700 flex items-center gap-2">
-                          <span className="text-[10px] font-black bg-slate-150 text-slate-800 rounded h-5.5 w-5.5 flex items-center justify-center border border-slate-300">
-                            {i + 1}
-                          </span>
-                          {adv.name}
-                        </td>
-                        <td className="py-3 text-center text-slate-600 font-mono font-bold text-xs">
-                          {adv.count}
-                        </td>
-                        <td className="py-3 text-right font-bold text-slate-900 font-mono text-sm">
-                          {formatCOP(adv.total)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="pt-2">
+                {advisorViewMode === 'table' && (
+                  <div className="overflow-x-auto animate-in fade-in duration-300">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b-2 border-slate-900 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                          <th className="py-2.5 font-space">Asesor Comercial</th>
+                          <th className="py-2.5 text-center font-space">Pagos Validados</th>
+                          <th className="py-2.5 text-right font-space">Monto Recaudado</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {advisorStats.map((adv, i) => (
+                          <tr key={adv.name} className="hover:bg-slate-50">
+                            <td className="py-3 font-space font-bold text-slate-700 flex items-center gap-2">
+                              <span className="text-[10px] font-black bg-slate-150 text-slate-800 rounded h-5.5 w-5.5 flex items-center justify-center border border-slate-300">
+                                {i + 1}
+                              </span>
+                              {adv.name}
+                            </td>
+                            <td className="py-3 text-center text-slate-600 font-mono font-bold text-xs">
+                              {adv.count}
+                            </td>
+                            <td className="py-3 text-right font-bold text-slate-900 font-mono text-sm">
+                              {formatCOP(adv.total)}
+                            </td>
+                          </tr>
+                        ))}
+                        {advisorStats.length === 0 && (
+                          <tr>
+                            <td colSpan={3} className="py-8 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">
+                              No hay asesores con abonos validados en este periodo
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {advisorViewMode === 'chart_bar' && (
+                  <div className="animate-in fade-in duration-300">
+                    <CustomBarChart data={advisorDataList} />
+                  </div>
+                )}
+
+                {advisorViewMode === 'chart_pie' && (
+                  <div className="animate-in fade-in duration-300">
+                    <CustomPieChart data={advisorDataList} />
+                  </div>
+                )}
               </div>
             </div>
           )}

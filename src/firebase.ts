@@ -293,7 +293,8 @@ export function initializeRealtimeListeners() {
         showSumaConsolidada: true,
         showEficaciaConciliaria: true,
         showParticipacionSede: false,
-        showRendimientoAsesores: true
+        showRendimientoAsesores: true,
+        showFiltrosConsulta: false
       };
       localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(defaultConfig));
     }
@@ -1334,7 +1335,8 @@ export function getReportConfig(): ReportConfig {
     showSumaConsolidada: true,
     showEficaciaConciliaria: true,
     showParticipacionSede: false,
-    showRendimientoAsesores: true
+    showRendimientoAsesores: true,
+    showFiltrosConsulta: false
   };
   if (!data) return defaultConfig;
   try {
