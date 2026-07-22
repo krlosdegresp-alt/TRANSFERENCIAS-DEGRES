@@ -25,25 +25,85 @@
 
 /* Print Styles for PDF Generation and Document Printing */
 @media print {
+  /* 1. Reset all top-level containers so multi-page printing flows naturally */
+  html,
+  body,
+  #root,
+  #app-root-shell,
+  main,
+  #active-view-container {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+    display: block !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
   @page {
     size: letter portrait;
-    margin: 15mm 15mm 15mm 15mm;
+    margin: 12mm 15mm 15mm 15mm;
   }
 
-  body {
-    background-color: #ffffff !important;
-    color: #0f172a !important;
-    font-family: Arial, Helvetica, sans-serif !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  /* Hide app shell and navigation elements */
-  nav, header, aside, button, .no-print, .no-print-area {
+  /* 2. Hide web navigation, headers, footers, buttons, and sidebars */
+  header,
+  footer,
+  nav,
+  aside,
+  button,
+  .no-print,
+  .no-print-area,
+  #chat-soporte-widget,
+  #google-meet-widget {
     display: none !important;
   }
 
-  /* Ensure the printable container fills page naturally */
+  /* 3. Reset preview modal so it flows directly onto the print canvas */
+  .pdf-preview-modal-backdrop {
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    backdrop-filter: none !important;
+  }
+
+  .pdf-preview-modal-card {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .pdf-preview-modal-body {
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  /* 4. Format the printable document container */
   .printable-document-container {
     position: static !important;
     width: 100% !important;
@@ -53,6 +113,10 @@
     box-shadow: none !important;
     border: none !important;
     background: #ffffff !important;
+    color: #0f172a !important;
+    font-family: Arial, Helvetica, sans-serif !important;
+    font-size: 10pt !important;
+    line-height: 1.5 !important;
   }
 
   /* Page breaks */
@@ -61,13 +125,34 @@
     break-before: page !important;
   }
 
-  /* Keep tables neat */
+  /* Keep headings with their section content */
+  h1, h2, h3, h4 {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  /* Tables styling in print */
   table {
+    width: 100% !important;
+    border-collapse: collapse !important;
     page-break-inside: auto;
+    margin-top: 10px !important;
+    margin-bottom: 15px !important;
   }
   tr {
-    page-break-inside: avoid;
-    page-break-after: auto;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  th {
+    background-color: #1A2D7C !important;
+    color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    padding: 6px 8px !important;
+  }
+  td {
+    padding: 6px 8px !important;
+    border: 1px solid #cbd5e1 !important;
   }
 }
 

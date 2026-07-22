@@ -1161,7 +1161,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
                     Documento Oficial • Confidencial DEGRES S.A.S.
                   </td>
                   <td style="border: none; padding: 0; text-align: right; font-family: 'Arial', sans-serif; font-size: 8pt; color: #94a3b8; vertical-align: middle;">
-                    Pág. <span style="mso-field-code: PAGE"></span> de <span style="mso-field-code: NUMPAGES"></span>
+                    Documento Oficial DEGRES S.A.S. • Área de TI
                   </td>
                 </tr>
               </table>
@@ -1171,7 +1171,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
           ${manualContent}
           
           <div class="footer">
-            Documento Confidencial de DEGRES S.A.S. • Todos los derechos reservados • Elaborado en 2026
+            Documento Confidencial de DEGRES S.A.S. • Área de TI • Todos los derechos reservados • 2026
           </div>
         </div>
       </body>
@@ -1199,6 +1199,10 @@ export default function Manuales({ currentUser }: ManualesProps) {
   const handleDownloadPdf = (target: 'active' | 'all') => {
     setPrintTarget(target);
     setPdfPreviewOpen(true);
+    // Auto-trigger browser print dialog after modal mounts
+    setTimeout(() => {
+      window.print();
+    }, 400);
   };
 
   return (
@@ -1680,11 +1684,11 @@ export default function Manuales({ currentUser }: ManualesProps) {
 
       {/* PDF Export & Print Preview Modal */}
       {pdfPreviewOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-start overflow-y-auto p-3 sm:p-6 no-print-area">
-          <div className="w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]">
+        <div className="pdf-preview-modal-backdrop fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-start overflow-y-auto p-3 sm:p-6">
+          <div className="pdf-preview-modal-card w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]">
             
             {/* Modal Top Bar (Hidden on print) */}
-            <div className="bg-[#1A2D7C] text-white p-4 px-6 flex flex-wrap items-center justify-between gap-3 shadow-md border-b-4 border-[#F47920] no-print">
+            <div className="no-print bg-[#1A2D7C] text-white p-4 px-6 flex flex-wrap items-center justify-between gap-3 shadow-md border-b-4 border-[#F47920]">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/10 rounded-xl border border-white/20">
                   <FileText className="h-5 w-5 text-[#F47920]" />
@@ -1721,7 +1725,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
             </div>
 
             {/* Modal Body Container */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-100/80 text-slate-800 scrollbar-thin">
+            <div className="pdf-preview-modal-body flex-1 overflow-y-auto p-4 md:p-8 bg-slate-100/80 text-slate-800 scrollbar-thin">
               <div className="printable-document-container max-w-4xl mx-auto bg-white p-6 md:p-12 shadow-lg rounded-xl border border-slate-200 text-xs leading-relaxed font-sans">
                 
                 {/* Document Header */}
