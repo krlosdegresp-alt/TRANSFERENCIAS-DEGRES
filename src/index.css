@@ -107,9 +107,10 @@
 
   /* Page break rules */
   .page-break,
-  .print-page-break {
-    page-break-before: always !important;
-    break-before: page !important;
+  .print-page-break,
+  .pdf-page {
+    page-break-after: always !important;
+    break-after: page !important;
   }
 
   /* Keep headings with section content */

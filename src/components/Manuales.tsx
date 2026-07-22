@@ -589,6 +589,355 @@ export default function Manuales({ currentUser }: ManualesProps) {
 
   const [activeManual, setActiveManual] = useState<'admin' | 'tesorera' | 'cajera' | 'asesor'>(getInitialManual);
 
+  // Common corporate header for PDF and printable document pages
+  const getPdfPageHeader = () => `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1A2D7C; padding-bottom: 8px; margin-bottom: 16px; width: 100%; box-sizing: border-box;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <img src="${logoBase64}" alt="Logo DEGRES" style="height: 30px; width: auto; object-fit: contain;" />
+        <span style="font-weight: 800; color: #1A2D7C; font-size: 11pt; font-family: Arial, sans-serif; letter-spacing: 0.5px;">DEGRES S.A.S.</span>
+      </div>
+      <div style="text-align: right;">
+        <span style="font-size: 8.5pt; color: #F47920; font-weight: bold; font-family: Arial, sans-serif; text-transform: uppercase;">Plataforma Conciliaria • Documento Oficial</span>
+      </div>
+    </div>
+  `;
+
+  // Common corporate footer for PDF and printable document pages
+  const getPdfPageFooter = (pageLabel?: string) => `
+    <div style="margin-top: auto; border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 8pt; color: #64748b; font-family: Arial, sans-serif; display: flex; justify-content: space-between; align-items: center; width: 100%; box-sizing: border-box;">
+      <span>Documento Confidencial DEGRES S.A.S. • Área de TI</span>
+      <span style="font-weight: bold; color: #1A2D7C;">${pageLabel || ''}</span>
+    </div>
+  `;
+
+  // Dedicated Cover Page (Portada) HTML
+  const getCoverPagePdfHtml = (roleTitle: string) => `
+    <div class="pdf-page cover-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 40px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      <!-- Top Corporate Header -->
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1A2D7C; padding-bottom: 12px;">
+        <img src="${logoBase64}" alt="Logo DEGRES" style="height: 52px; width: auto; object-fit: contain;" />
+        <div style="text-align: right;">
+          <div style="font-weight: 900; color: #1A2D7C; font-size: 13pt; letter-spacing: 0.5px;">DEGRES S.A.S.</div>
+          <div style="font-size: 8.5pt; color: #F47920; font-weight: bold; text-transform: uppercase;">Área de TI • Control Interno</div>
+        </div>
+      </div>
+
+      <!-- Center Title Box -->
+      <div style="margin: auto 0; text-align: center; padding: 40px 30px; border: 3px double #1A2D7C; border-radius: 12px; background-color: #f8fafc;">
+        <h1 style="color: #1A2D7C; font-size: 21pt; font-weight: 900; margin-bottom: 6px; letter-spacing: 1px;">DEGRES S.A.S.</h1>
+        <p style="color: #F47920; font-size: 11pt; font-weight: 800; margin-top: 0; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1.5px;">PLATAFORMA CONCILIARIA DEGRES</p>
+        
+        <div style="width: 80px; height: 4px; background-color: #F47920; margin: 0 auto 20px auto; border-radius: 2px;"></div>
+        
+        <h2 style="color: #0f172a; font-size: 14pt; font-weight: 800; margin-bottom: 20px; text-transform: uppercase; line-height: 1.4;">
+          MANUAL DE USUARIO Y GUÍA OPERATIVA<br/>
+          <span style="color: #1A2D7C; font-size: 16pt; font-weight: 900;">${roleTitle}</span>
+        </h2>
+        
+        <div style="display: inline-block; padding: 7px 16px; background-color: #e2e8f0; border-radius: 20px; font-size: 9pt; font-weight: bold; color: #334155; margin-bottom: 22px;">
+          Documento Oficial de Capacitación y Auditoría Contable
+        </div>
+
+        <div style="font-size: 9pt; color: #475569; line-height: 1.6;">
+          <p style="margin: 3px 0;"><strong>Versión Oficial:</strong> 2.0 (Julio 2026)</p>
+          <p style="margin: 3px 0;"><strong>Publicado por:</strong> Área de Tecnologías de la Información (TI)</p>
+          <p style="margin: 3px 0;"><strong>Sedes Operativas:</strong> Guayabal • Sabaneta • Naranjal (Medellín, Colombia)</p>
+        </div>
+      </div>
+
+      <!-- Bottom Disclaimer & Copyright -->
+      <div style="border-top: 1px solid #cbd5e1; padding-top: 10px; text-align: center; font-size: 8pt; color: #64748b;">
+        <p style="margin: 0 0 3px 0; font-style: italic;">Este documento contiene normatividades operativas internas de DEGRES S.A.S. Su aplicación es de carácter estrictamente obligatorio para el personal autorizado.</p>
+        <p style="margin: 0; font-weight: bold; color: #1A2D7C;">© 2026 DEGRES S.A.S. — Todos los derechos reservados.</p>
+      </div>
+    </div>
+  `;
+
+  // Table of Contents Page for Unified Manual
+  const getIndexPagePdfHtml = () => `
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h1 style="color: #1A2D7C; font-size: 16pt; font-weight: bold; border-bottom: 2.5px solid #F47920; padding-bottom: 6px; margin-bottom: 16px; text-transform: uppercase;">
+          ÍNDICE GENERAL DEL MANUAL UNIFICADO
+        </h1>
+        <p style="font-size: 9.5pt; color: #475569; margin-bottom: 20px; text-align: justify; line-height: 1.5;">
+          El presente documento compila la totalidad de los manuales de usuario y protocolos de operación de la <strong>Plataforma Conciliaria DEGRES S.A.S.</strong> Su estructura modular permite consultar de forma rápida las funciones específicas de cada rol dentro de la organización:
+        </p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+          <thead>
+            <tr style="background-color: #1A2D7C; color: white;">
+              <th style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; text-align: left; font-size: 9.5pt;">Módulo</th>
+              <th style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; text-align: left; font-size: 9.5pt;">Manual Operativo / Rol</th>
+              <th style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; text-align: center; font-size: 9.5pt; width: 110px;">Referencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; font-weight: bold; color: #1A2D7C;">Sección 1</td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt;">
+                <strong>MANUAL ROL ADMINISTRADOR:</strong> Control Maestro, Auditoría en Tiempo Real, Simulador de Perfiles y Limpieza Contable.
+              </td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; text-align: center; color: #F47920; font-weight: bold;">Manual 1</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; font-weight: bold; color: #1A2D7C;">Sección 2</td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt;">
+                <strong>MANUAL ROL TESORERA:</strong> Cargue de Extractos Bancarios de Bancolombia, Mapeo Inteligente y Resumen de Importación.
+              </td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; text-align: center; color: #F47920; font-weight: bold;">Manual 2</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; font-weight: bold; color: #1A2D7C;">Sección 3</td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt;">
+                <strong>MANUAL ROL CAJERA:</strong> Búsqueda, Filtrado Rápido, Identificación de Abonos en Cajas de Guayabal, Sabaneta y Naranjal.
+              </td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; text-align: center; color: #F47920; font-weight: bold;">Manual 3</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; font-weight: bold; color: #1A2D7C;">Sección 4</td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt;">
+                <strong>MANUAL ROL ASESOR COMERCIAL:</strong> Seguimiento de Comisiones, Indicadores KPI y Gráficos por Sede Física.
+              </td>
+              <td style="padding: 10px; border: 1px solid #cbd5e1; font-size: 9pt; text-align: center; color: #F47920; font-weight: bold;">Manual 4</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 12px; border-radius: 4px; font-size: 8.5pt; color: #991b1b; line-height: 1.45;">
+          <strong>AVISO DE CUMPLIMIENTO:</strong> Todos los colaboradores deben seguir estrictamente el protocolo descrito en este manual. Cualquier inconsistencia debe ser reportada de inmediato al correo <em>soporte@degrescolombia.com</em>.
+        </div>
+      </div>
+      ${getPdfPageFooter('Índice General')}
+    </div>
+  `;
+
+  // Structured Page Builder for Admin
+  const getAdminStructuredPages = () => `
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h1 style="color: #1A2D7C; font-size: 15pt; font-weight: bold; margin-bottom: 10px; border-bottom: 2.5px solid #1A2D7C; padding-bottom: 4px;">
+          MANUAL DE USUARIO: ROL ADMINISTRADOR (CONTROL TOTAL)
+        </h1>
+        ${getCommonIntroHtml()}
+        <h2 style="color: #1A2D7C; font-size: 11pt; margin-top: 14px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px;">2. PERFIL ADMINISTRATIVO: ATRIBUCIONES Y ALCANCE</h2>
+        <p style="text-align: justify; font-size: 9pt; line-height: 1.45; color: #334155;">
+          El <strong>Administrador</strong> tiene acceso irrestricto de lectura y escritura sobre todos los módulos. Audita la correspondencia entre los abonos conciliados, corrige inconsistencias en caja y gestiona los cierres contables mensuales.
+        </p>
+      </div>
+      ${getPdfPageFooter('Página 1 - Admin')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h2 style="color: #1A2D7C; font-size: 12pt; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 3px; margin-bottom: 10px;">3. PASO A PASO: OPERACIONES CRÍTICAS</h2>
+        
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 8px; margin-bottom: 4px;">Paso 3.1: Uso de la Herramienta de Simulación de Perfiles</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 8px;">
+          Permite auditar la vista exacta que tiene cada rol operativo (Cajeras, Tesoreras y Asesores). Seleccione el usuario en el encabezado superior y confirme para cambiar la interfaz en tiempo real.
+        </p>
+        ${getExportMockupHtml('simulacion_usuarios')}
+
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px;">Paso 3.2: Configuración de Visibilidad en Dashboard</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 8px;">
+          Conmute los interruptores para activar u ocultar la Suma Consolidada, Eficacia Conciliaria o Rankings de Asesores en las pantallas de las sedes.
+        </p>
+        ${getExportMockupHtml('interruptores')}
+      </div>
+      ${getPdfPageFooter('Página 2 - Simulación y Visibilidad')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h3 style="color: #F47920; font-size: 10.5pt; font-weight: bold; margin-top: 4px; margin-bottom: 6px;">Paso 3.3: Auditoría en Tiempo Real de Operaciones (Logs)</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.45; color: #334155; margin-bottom: 8px;">
+          Bitácora inalterable que registra cada evento: cargues de extractos, identificaciones en caja y reversiones contables, detallando fecha, hora exacta en Colombia y sede física.
+        </p>
+        ${getExportMockupHtml('auditoria')}
+
+        <h3 style="color: #F47920; font-size: 10.5pt; font-weight: bold; margin-top: 14px; margin-bottom: 6px;">Paso 3.4: Reversiones de Datos y Limpieza Contable</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.45; color: #334155; margin-bottom: 8px;">
+          Utilice el botón <strong>"Revertir Conciliaciones"</strong> para volver transacciones a estado pendiente en caso de error masivo, o <strong>"Reiniciar Base de Datos"</strong> al cierre de periodo contable.
+        </p>
+        ${getExportMockupHtml('limpieza_db')}
+      </div>
+      ${getPdfPageFooter('Página 3 - Auditoría y Cierre')}
+    </div>
+  `;
+
+  // Structured Page Builder for Tesorera
+  const getTesoreraStructuredPages = () => `
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h1 style="color: #1A2D7C; font-size: 15pt; font-weight: bold; margin-bottom: 10px; border-bottom: 2.5px solid #1A2D7C; padding-bottom: 4px;">
+          MANUAL DE USUARIO: ROL TESORERA (CARGUE DE EXTRACTOS)
+        </h1>
+        ${getCommonIntroHtml()}
+        <h2 style="color: #1A2D7C; font-size: 11pt; margin-top: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px;">2. RESPONSABILIDAD OPERATIVA EN TESORERÍA</h2>
+        <p style="text-align: justify; font-size: 9pt; line-height: 1.45; color: #334155;">
+          La <strong>Tesorera</strong> alimenta la plataforma con los extractos bancarios reales de Bancolombia. Su puntualidad es fundamental para que las cajeras puedan autorizar despachos en tiendas físicas.
+        </p>
+      </div>
+      ${getPdfPageFooter('Página 1 - Tesorería')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h2 style="color: #1A2D7C; font-size: 12pt; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 3px; margin-bottom: 10px;">3. PROCEDIMIENTO OPERATIVO "CARGAR BANCO"</h2>
+        
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 6px; margin-bottom: 4px;">Paso 3.1: Descarga de Extracto Bancario</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Exporte los movimientos diarios desde la Sucursal Virtual Bancolombia en formato Excel (.xlsx, .xls) o archivo plano (.csv).
+        </p>
+        ${getExportMockupHtml('sucursal_virtual')}
+
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 12px; margin-bottom: 4px;">Paso 3.2: Carga y Arrastre del Archivo</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Ingrese a la pestaña <strong>"Cargar Banco"</strong> y suelte el archivo dentro de la nube de carga interactiva.
+        </p>
+        ${getExportMockupHtml('zona_arrastre')}
+      </div>
+      ${getPdfPageFooter('Página 2 - Carga de Extracto')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 4px; margin-bottom: 4px;">Paso 3.3: Selección de Sede / Cuenta Bancaria</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Seleccione la cuenta bancaria correspondiente a Guayabal (***6519), Sabaneta (***0916) o Naranjal (***6807).
+        </p>
+        ${getExportMockupHtml('selector_sede')}
+
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 10px; margin-bottom: 4px;">Paso 3.4: Mapeo de Columnas e Importación</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Asocie la Fecha, Referencia, Descripción y Monto COP. Al finalizar, presione <strong>"Procesar y Guardar"</strong> para sincronizar con Firebase.
+        </p>
+        ${getExportMockupHtml('mapeo_columnas')}
+      </div>
+      ${getPdfPageFooter('Página 3 - Sede y Mapeo')}
+    </div>
+  `;
+
+  // Structured Page Builder for Cajera
+  const getCajeraStructuredPages = () => `
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h1 style="color: #1A2D7C; font-size: 15pt; font-weight: bold; margin-bottom: 10px; border-bottom: 2.5px solid #1A2D7C; padding-bottom: 4px;">
+          MANUAL DE USUARIO: ROL CAJERA (VALIDACIÓN EN CAJA)
+        </h1>
+        ${getCommonIntroHtml()}
+        <h2 style="color: #1A2D7C; font-size: 11pt; margin-top: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px;">2. RESPONSABILIDAD CRÍTICA EN PUNTOS DE VENTA</h2>
+        <p style="text-align: justify; font-size: 9pt; line-height: 1.45; color: #334155;">
+          La <strong>Cajera</strong> es el filtro final de control interno. Prohibido autorizar despachos apoyándose únicamente en pantallazos móviles de los clientes. El pago debe marcarse como <strong>"IDENTIFICADA"</strong> en la plataforma.
+        </p>
+      </div>
+      ${getPdfPageFooter('Página 1 - Cajeras')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h2 style="color: #1A2D7C; font-size: 12pt; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 3px; margin-bottom: 10px;">3. PASO A PASO: CONCILIACIÓN EN CAJA</h2>
+        
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 6px; margin-bottom: 4px;">Paso 3.1 & 3.2: Filtrado Rápido e Identificación</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Digite los últimos dígitos de la referencia o el monto en pesos para localizar la fila de la transferencia en tiempo real.
+        </p>
+        ${getExportMockupHtml('filtros_caja')}
+
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 12px; margin-bottom: 4px;">Paso 3.3: Formulario de Identificación de Pago</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Presione <strong>"Identificar Pago"</strong>, ingrese Nombre del Cliente, Cédula/NIT, Asesor Comercial asignado y Número de Factura.
+        </p>
+        ${getExportMockupHtml('form_identificar')}
+      </div>
+      ${getPdfPageFooter('Página 2 - Formulario en Caja')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 4px; margin-bottom: 4px;">Paso 3.4: Confirmación y Cambio de Estado</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Al presionar <strong>"Guardar Validación"</strong>, la transacción cambiará a estado verde <strong>"IDENTIFICADA"</strong> y la mercancía quedará lista para despacho.
+        </p>
+        ${getExportMockupHtml('transaccion_identificada')}
+
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 10px; margin-bottom: 4px;">Paso 3.5: Soporte Integrado (Chat y Google Meet)</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Si requiere soporte inmediato con Tesorería, utilice los botones flotantes inferiores para iniciar chat o videollamada de Google Meet.
+        </p>
+        ${getExportMockupHtml('chat_google_meet')}
+      </div>
+      ${getPdfPageFooter('Página 3 - Validación y Asistencia')}
+    </div>
+  `;
+
+  // Structured Page Builder for Asesor Comercial
+  const getAsesorStructuredPages = () => `
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h1 style="color: #1A2D7C; font-size: 15pt; font-weight: bold; margin-bottom: 10px; border-bottom: 2.5px solid #1A2D7C; padding-bottom: 4px;">
+          MANUAL DE USUARIO: ROL ASESOR COMERCIAL (VENTAS)
+        </h1>
+        ${getCommonIntroHtml()}
+        <h2 style="color: #1A2D7C; font-size: 11pt; margin-top: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px;">2. SEGUIMIENTO DE METAS Y COMISIONES</h2>
+        <p style="text-align: justify; font-size: 9pt; line-height: 1.45; color: #334155;">
+          El <strong>Asesor Comercial</strong> audita de forma ágil el total de sus abonos identificados por caja para verificar la concordancia con sus comisiones mensuales.
+        </p>
+      </div>
+      ${getPdfPageFooter('Página 1 - Asesores')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h2 style="color: #1A2D7C; font-size: 12pt; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 3px; margin-bottom: 10px;">3. DASHBOARD Y GRÁFICOS DE RENDIMIENTO</h2>
+        
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 6px; margin-bottom: 4px;">Paso 3.1: Tarjetas KPI y Recaudo General</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Consulte la Suma Consolidada de Caja y el Porcentaje de Eficacia Conciliaria del periodo actual.
+        </p>
+        ${getExportMockupHtml('indicadores_kpi')}
+
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 12px; margin-bottom: 4px;">Paso 3.2: Participación por Sede Física</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Análisis gráfico por tiendas (Guayabal, Sabaneta, Naranjal) con vista de Barras, Columnas y Torta.
+        </p>
+        ${getExportMockupHtml('graficos_sede')}
+      </div>
+      ${getPdfPageFooter('Página 2 - KPI y Sedes')}
+    </div>
+
+    <div class="pdf-page" style="width: 800px; min-height: 1050px; height: 1050px; padding: 36px 42px; box-sizing: border-box; background-color: #ffffff; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; break-after: page; position: relative; font-family: Arial, sans-serif;">
+      ${getPdfPageHeader()}
+      <div>
+        <h3 style="color: #F47920; font-size: 10pt; font-weight: bold; margin-top: 4px; margin-bottom: 4px;">Paso 3.3: Escalafón de Rendimiento de Asesores</h3>
+        <p style="text-align: justify; font-size: 8.5pt; line-height: 1.4; color: #334155; margin-bottom: 6px;">
+          Ranking de recaudo individual en pesos con detalle de abonos validados.
+        </p>
+        ${getExportMockupHtml('rendimiento_asesores')}
+
+        <div style="background-color: #f8fafc; border-left: 4px solid #1A2D7C; padding: 10px 14px; margin-top: 14px; border-radius: 4px;">
+          <h4 style="color: #1A2D7C; font-size: 9.5pt; font-weight: bold; margin-top: 0; margin-bottom: 4px;">RECOMENDACIÓN COMERCIAL</h4>
+          <p style="font-size: 8.5pt; color: #475569; margin: 0; line-height: 1.4;">
+            Verifique siempre que la cajera seleccione su nombre exacto en el formulario al procesar la transacción del cliente para asegurar el registro inmediato de sus comisiones.
+          </p>
+        </div>
+      </div>
+      ${getPdfPageFooter('Página 3 - Ranking y Cierre')}
+    </div>
+  `;
+
   // Common corporate introduction to include in Word documents
   const getCommonIntroHtml = () => `
     <div style="background-color: #f8fafc; border-left: 6px solid #F47920; padding: 16px; margin-bottom: 20px; border-radius: 4px; font-family: Arial, sans-serif;">
@@ -1201,36 +1550,30 @@ export default function Manuales({ currentUser }: ManualesProps) {
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
+  // Flawless Direct PDF Generation capturing page by page
   const handleGenerateDirectPdf = async (target: 'active' | 'all') => {
     setIsGeneratingPdf(true);
     const isAll = target === 'all';
     const roleName = isAll ? 'Unificado_Completo' : activeManual.toUpperCase();
 
-    let contentHtml = '';
+    let pagesHtml = '';
     if (isAll) {
-      contentHtml = `
-        <div style="text-align: center; padding: 30px 20px; border: 4px double #1A2D7C; margin-bottom: 24px; border-radius: 8px; background-color: #f8fafc;">
-          <h1 style="color: #1A2D7C; font-size: 20pt; font-weight: bold; margin-bottom: 4px; font-family: Arial, sans-serif;">DEGRES S.A.S.</h1>
-          <h3 style="color: #F47920; font-size: 11pt; font-weight: bold; margin-top: 0; margin-bottom: 12px; letter-spacing: 1px; font-family: Arial, sans-serif;">PLATAFORMA CONCILIARIA DEGRES</h3>
-          <div style="width: 80px; height: 3px; background-color: #F47920; margin: 10px auto;"></div>
-          <h2 style="color: #1e293b; font-size: 13pt; font-weight: bold; margin-bottom: 16px; text-transform: uppercase; font-family: Arial, sans-serif;">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES UNIFICADO</h2>
-          <p style="font-size: 9.5pt; color: #64748b; margin-bottom: 4px;"><strong>Versión:</strong> 2.0 (Julio 2026)</p>
-          <p style="font-size: 9.5pt; color: #64748b; margin-bottom: 4px;"><strong>Autor:</strong> Área de TI</p>
-          <p style="font-size: 9.5pt; color: #64748b; margin-bottom: 12px;"><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
-        </div>
-        ${getAdminManualHtml()}
-        <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px;"></div>
-        ${getTesoreraManualHtml()}
-        <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px;"></div>
-        ${getCajeraManualHtml()}
-        <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px;"></div>
-        ${getAsesorManualHtml()}
-      `;
+      pagesHtml = getCoverPagePdfHtml('MANUAL OPERATIVO UNIFICADO (TODOS LOS ROLES)')
+        + getIndexPagePdfHtml()
+        + getAdminStructuredPages()
+        + getTesoreraStructuredPages()
+        + getCajeraStructuredPages()
+        + getAsesorStructuredPages();
     } else {
-      if (activeManual === 'admin') contentHtml = getAdminManualHtml();
-      else if (activeManual === 'tesorera') contentHtml = getTesoreraManualHtml();
-      else if (activeManual === 'cajera') contentHtml = getCajeraManualHtml();
-      else contentHtml = getAsesorManualHtml();
+      const roleTitle = activeManual === 'admin' ? 'ROL ADMINISTRADOR (CONTROL TOTAL)' :
+                        activeManual === 'tesorera' ? 'ROL TESORERA (CARGUE DE EXTRACTOS)' :
+                        activeManual === 'cajera' ? 'ROL CAJERA (VALIDACIÓN DE ABONOS)' : 'ROL ASESOR COMERCIAL (VENTAS)';
+      
+      const rolePages = activeManual === 'admin' ? getAdminStructuredPages() :
+                        activeManual === 'tesorera' ? getTesoreraStructuredPages() :
+                        activeManual === 'cajera' ? getCajeraStructuredPages() : getAsesorStructuredPages();
+
+      pagesHtml = getCoverPagePdfHtml(roleTitle) + rolePages;
     }
 
     const tempDiv = document.createElement('div');
@@ -1238,70 +1581,40 @@ export default function Manuales({ currentUser }: ManualesProps) {
     tempDiv.style.left = '-9999px';
     tempDiv.style.top = '0';
     tempDiv.style.width = '800px';
-    tempDiv.style.backgroundColor = '#ffffff';
-    tempDiv.style.padding = '32px';
-    tempDiv.style.color = '#1e293b';
-    tempDiv.style.fontFamily = 'Arial, Helvetica, sans-serif';
-    tempDiv.style.fontSize = '12px';
-    tempDiv.style.lineHeight = '1.6';
+    tempDiv.style.backgroundColor = '#f1f5f9';
 
-    const headerHtml = `
-      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1A2D7C; padding-bottom: 10px; margin-bottom: 20px;">
-        <div>
-          <div style="font-weight: bold; color: #1A2D7C; font-size: 15px; text-transform: uppercase;">DEGRES S.A.S.</div>
-          <div style="font-size: 10px; color: #64748b; text-transform: uppercase;">Plataforma Conciliaria • Documento Oficial de TI</div>
-        </div>
-        <div style="text-align: right;">
-          <div style="font-weight: bold; color: #1A2D7C; font-size: 12px;">DEGRES S.A.S.</div>
-          <div style="font-size: 10px; color: #F47920; font-weight: bold; text-transform: uppercase;">Área de TI • 2026</div>
-        </div>
-      </div>
-    `;
-
-    const footerHtml = `
-      <div style="margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 9px; color: #64748b; text-align: center;">
-        Documento Confidencial de DEGRES S.A.S. • Área de TI • Todos los derechos reservados • 2026
-      </div>
-    `;
-
-    tempDiv.innerHTML = headerHtml + contentHtml + footerHtml;
+    tempDiv.innerHTML = pagesHtml;
     document.body.appendChild(tempDiv);
 
     try {
-      const canvas = await html2canvas(tempDiv, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      window.scrollTo(0, 0);
+      const pageNodes = tempDiv.querySelectorAll<HTMLElement>('.pdf-page');
+      
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'letter'
       });
 
-      const imgWidth = 215.9;
-      const pageHeight = 279.4;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
+      for (let i = 0; i < pageNodes.length; i++) {
+        const pageNode = pageNodes[i];
+        
+        const canvas = await html2canvas(pageNode, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff'
+        });
 
-      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      while (heightLeft >= 2) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+        const imgData = canvas.toDataURL('image/jpeg', 0.98);
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, 0, 215.9, 279.4);
       }
 
       pdf.save(`Manual_Usuario_${roleName}_DEGRES.pdf`);
     } catch (err) {
-      console.error("Error al generar PDF:", err);
-      alert("No se pudo generar la descarga directa. Se abrirá la vista previa para imprimir.");
+      console.error('Error al generar PDF directo:', err);
+      alert('Ocurrió un error al generar el PDF. Se abrirá la vista previa para guardar.');
       setPdfPreviewOpen(true);
     } finally {
       if (document.body.contains(tempDiv)) {
@@ -1322,33 +1635,24 @@ export default function Manuales({ currentUser }: ManualesProps) {
       ? 'Manual de Usuario Unificado - DEGRES S.A.S.' 
       : `Manual de Usuario - ${activeManual.toUpperCase()} - DEGRES S.A.S.`;
 
-    let contentHtml = '';
+    let pagesHtml = '';
     if (isAll) {
-      contentHtml = `
-        <div style="text-align: center; padding: 40px 20px; border: 4px double #1A2D7C; margin-bottom: 30px; border-radius: 8px; background-color: #f8fafc;">
-          <h1 style="color: #1A2D7C; font-size: 24pt; font-weight: bold; margin-bottom: 6px; font-family: Arial, sans-serif;">DEGRES S.A.S.</h1>
-          <h3 style="color: #F47920; font-size: 13pt; font-weight: bold; margin-top: 0; margin-bottom: 20px; letter-spacing: 1px; font-family: Arial, sans-serif;">PLATAFORMA CONCILIARIA DEGRES</h3>
-          <div style="width: 100px; height: 3px; background-color: #F47920; margin: 15px auto;"></div>
-          <h2 style="color: #1e293b; font-size: 15pt; font-weight: bold; margin-bottom: 30px; text-transform: uppercase; font-family: Arial, sans-serif;">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES UNIFICADO</h2>
-          <p style="font-size: 10pt; color: #64748b; margin-bottom: 6px; font-family: Arial, sans-serif;"><strong>Versión:</strong> 2.0 (Julio 2026)</p>
-          <p style="font-size: 10pt; color: #64748b; margin-bottom: 6px; font-family: Arial, sans-serif;"><strong>Autor:</strong> Área de TI</p>
-          <p style="font-size: 10pt; color: #64748b; margin-bottom: 20px; font-family: Arial, sans-serif;"><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
-        </div>
-
-        <div style="page-break-before: always;"></div>
-        ${getAdminManualHtml()}
-        <div style="page-break-before: always;"></div>
-        ${getTesoreraManualHtml()}
-        <div style="page-break-before: always;"></div>
-        ${getCajeraManualHtml()}
-        <div style="page-break-before: always;"></div>
-        ${getAsesorManualHtml()}
-      `;
+      pagesHtml = getCoverPagePdfHtml('MANUAL OPERATIVO UNIFICADO (TODOS LOS ROLES)')
+        + getIndexPagePdfHtml()
+        + getAdminStructuredPages()
+        + getTesoreraStructuredPages()
+        + getCajeraStructuredPages()
+        + getAsesorStructuredPages();
     } else {
-      if (activeManual === 'admin') contentHtml = getAdminManualHtml();
-      else if (activeManual === 'tesorera') contentHtml = getTesoreraManualHtml();
-      else if (activeManual === 'cajera') contentHtml = getCajeraManualHtml();
-      else contentHtml = getAsesorManualHtml();
+      const roleTitle = activeManual === 'admin' ? 'ROL ADMINISTRADOR (CONTROL TOTAL)' :
+                        activeManual === 'tesorera' ? 'ROL TESORERA (CARGUE DE EXTRACTOS)' :
+                        activeManual === 'cajera' ? 'ROL CAJERA (VALIDACIÓN DE ABONOS)' : 'ROL ASESOR COMERCIAL (VENTAS)';
+      
+      const rolePages = activeManual === 'admin' ? getAdminStructuredPages() :
+                        activeManual === 'tesorera' ? getTesoreraStructuredPages() :
+                        activeManual === 'cajera' ? getCajeraStructuredPages() : getAsesorStructuredPages();
+
+      pagesHtml = getCoverPagePdfHtml(roleTitle) + rolePages;
     }
 
     try {
@@ -1362,37 +1666,22 @@ export default function Manuales({ currentUser }: ManualesProps) {
             <title>${title}</title>
             <style>
               @media print {
-                @page { size: letter portrait; margin: 12mm 15mm 15mm 15mm; }
+                @page { size: letter portrait; margin: 0; }
                 .no-print { display: none !important; }
                 body { padding: 0 !important; margin: 0 !important; background: #ffffff !important; }
               }
               body {
                 font-family: Arial, Helvetica, sans-serif;
-                font-size: 10pt;
-                line-height: 1.5;
-                color: #1e293b;
                 margin: 0;
-                padding: 24px;
-                background: #f8fafc;
-              }
-              .document-wrapper {
-                max-width: 900px;
-                margin: 0 auto;
-                background: #ffffff;
-                padding: 40px;
-                border-radius: 12px;
-                box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
-                border: 1px solid #e2e8f0;
-              }
-              @media print {
-                .document-wrapper {
-                  box-shadow: none !important;
-                  border: none !important;
-                  padding: 0 !important;
-                  max-width: 100% !important;
-                }
+                padding: 20px;
+                background: #f1f5f9;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
               }
               .no-print-bar {
+                width: 100%;
+                max-width: 800px;
                 background: #1A2D7C;
                 color: white;
                 padding: 14px 24px;
@@ -1402,7 +1691,6 @@ export default function Manuales({ currentUser }: ManualesProps) {
                 justify-content: space-between;
                 align-items: center;
                 box-shadow: 0 4px 12px rgba(26,45,124,0.2);
-                font-family: Arial, sans-serif;
               }
               .btn-print {
                 background: #F47920;
@@ -1414,67 +1702,39 @@ export default function Manuales({ currentUser }: ManualesProps) {
                 cursor: pointer;
                 text-transform: uppercase;
                 font-size: 11px;
-                font-family: Arial, sans-serif;
-                letter-spacing: 0.5px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
               }
-              .btn-print:hover { background: #e06810; }
-              h1 { color: #1A2D7C; font-size: 18pt; font-weight: bold; border-bottom: 2px solid #F47920; padding-bottom: 6px; margin-top: 20px; margin-bottom: 12px; }
-              h2 { color: #1A2D7C; font-size: 13pt; font-weight: bold; margin-top: 18px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; }
-              h3 { color: #F47920; font-size: 11pt; font-weight: bold; margin-top: 12px; margin-bottom: 6px; }
-              p { margin-bottom: 8pt; text-align: justify; }
-              ul, ol { margin-top: 0; margin-bottom: 10pt; padding-left: 20px; }
-              li { margin-bottom: 4pt; }
-              table { width: 100%; border-collapse: collapse; margin-top: 10pt; margin-bottom: 15pt; }
-              th { background-color: #1A2D7C; color: #ffffff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #cbd5e1; font-size: 9.5pt; }
-              td { padding: 8px; border: 1px solid #cbd5e1; font-size: 9.5pt; }
-              .digital-mockup { border: 1.5px solid #cbd5e1; background-color: #ffffff; padding: 12px; margin: 12pt 0; border-radius: 8px; font-family: Arial, sans-serif; text-align: left; }
-              .footer-print { margin-top: 30pt; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 8.5pt; color: #64748b; text-align: center; }
+              .pdf-page {
+                box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+                margin-bottom: 24px;
+                background: white;
+              }
+              @media print {
+                .pdf-page {
+                  box-shadow: none !important;
+                  margin: 0 !important;
+                  page-break-after: always !important;
+                  break-after: page !important;
+                }
+              }
             </style>
           </head>
           <body>
-            <div class="no-print no-print-bar">
+            <div class="no-print-bar no-print">
               <div>
-                <div style="font-weight: bold; font-size: 14px;">📄 Documento Oficial Listo para Guardar en PDF</div>
-                <div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">En el cuadro de impresión de su navegador, elija como destino <strong>"Guardar como PDF"</strong>.</div>
+                <strong style="font-size: 13px;">DOCUMENTO OFICIAL DEGRES S.A.S.</strong>
+                <div style="font-size: 11px; color: #cbd5e1;">Presione el botón para guardar en PDF con el navegador</div>
               </div>
-              <button class="btn-print" onclick="window.print()">
-                🖨️ Guardar en PDF / Imprimir
-              </button>
+              <button onclick="window.print()" class="btn-print">🖨️ Imprimir / Guardar PDF</button>
             </div>
-
-            <div class="document-wrapper">
-              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1A2D7C; padding-bottom: 10px; margin-bottom: 24px;">
-                <div>
-                  <div style="font-weight: bold; color: #1A2D7C; font-size: 13pt; text-transform: uppercase;">DEGRES S.A.S.</div>
-                  <div style="font-size: 8.5pt; color: #64748b; text-transform: uppercase;">Plataforma Conciliaria • Documentación Oficial</div>
-                </div>
-                <div style="text-align: right;">
-                  <div style="font-weight: bold; color: #1A2D7C; font-size: 11pt;">DEGRES S.A.S.</div>
-                  <div style="font-size: 8.5pt; color: #F47920; font-weight: bold; text-transform: uppercase;">Área de TI</div>
-                </div>
-              </div>
-
-              ${contentHtml}
-
-              <div class="footer-print">
-                Documento Oficial Confidencial de DEGRES S.A.S. • Creado por el Área de TI • Todos los derechos reservados • 2026
-              </div>
-            </div>
-
-            <script>
-              setTimeout(function() {
-                window.focus();
-                window.print();
-              }, 400);
-            </script>
+            
+            ${pagesHtml}
           </body>
           </html>
         `);
         printWin.document.close();
       }
     } catch (e) {
-      console.warn("Pop-up window was blocked, falling back to modal print", e);
+      console.error("Error abriendo ventana de impresión:", e);
     }
   };
 
