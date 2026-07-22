@@ -7,6 +7,7 @@ import Carga from './components/Carga';
 import Transacciones from './components/Transacciones';
 import Reportes from './components/Reportes';
 import AdminPanel from './components/AdminPanel';
+import Manuales from './components/Manuales';
 import ChatSoporte from './components/ChatSoporte';
 import GoogleMeetCalling from './components/GoogleMeetCalling';
 import { getColombiaDateTime, formatDateHuman, formatTime12h } from './utils/formato';
@@ -184,6 +185,9 @@ export default function App() {
                   transactions={transactions} 
                   onRefreshData={handleRefreshData} 
                 />
+              )}
+              {activeTab === 'manuales' && (
+                <Manuales currentUser={currentUser} />
               )}
             </div>
           </div>

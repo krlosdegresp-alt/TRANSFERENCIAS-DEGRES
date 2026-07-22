@@ -11,7 +11,8 @@ import {
   Sparkles,
   Building2,
   ShieldCheck,
-  User as UserIcon
+  User as UserIcon,
+  BookOpen
 } from 'lucide-react';
 import { PREDEFINED_USERS } from '../firebase';
 
@@ -55,6 +56,12 @@ export default function Navigation({
       label: 'Administrador',
       icon: Settings,
       allowedRoles: ['Admin', 'Tesorera']
+    },
+    {
+      id: 'manuales',
+      label: 'Manuales de Usuario',
+      icon: BookOpen,
+      allowedRoles: ['Admin', 'Tesorera', 'Cajera', 'Asesor']
     }
   ];
 
