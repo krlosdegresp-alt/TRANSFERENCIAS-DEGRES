@@ -23,4 +23,52 @@
   scrollbar-width: none;  /* Firefox */
 }
 
+/* Print Styles for PDF Generation and Document Printing */
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 15mm 15mm 15mm 15mm;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    font-family: Arial, Helvetica, sans-serif !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide app shell and navigation elements */
+  nav, header, aside, button, .no-print, .no-print-area {
+    display: none !important;
+  }
+
+  /* Ensure the printable container fills page naturally */
+  .printable-document-container {
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+  }
+
+  /* Page breaks */
+  .page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  /* Keep tables neat */
+  table {
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+}
+
 

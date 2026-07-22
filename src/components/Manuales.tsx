@@ -949,7 +949,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
           <div style="width: 120px; height: 3px; background-color: #F47920; margin: 20px auto;"></div>
           <h2 style="color: #1e293b; font-size: 16pt; font-weight: bold; margin-bottom: 40px; text-transform: uppercase;">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES</h2>
           <p style="font-size: 11pt; color: #64748b; margin-bottom: 8px;"><strong>Versión:</strong> 2.0 (Julio 2026)</p>
-          <p style="font-size: 11pt; color: #64748b; margin-bottom: 8px;"><strong>Autor:</strong> Departamento de Tecnología y Contabilidad</p>
+          <p style="font-size: 11pt; color: #64748b; margin-bottom: 8px;"><strong>Autor:</strong> Área de TI</p>
           <p style="font-size: 11pt; color: #64748b; margin-bottom: 40px;"><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
           <p style="font-size: 9pt; color: #94a3b8; font-style: italic; max-width: 500px; margin: 0 auto; line-height: 1.4;">
             Este documento contiene los manuales de usuario oficiales unificados para todos los roles operativos de la compañía. Su cumplimiento es obligatorio en todos los puntos de venta físicos de la organización.
@@ -1194,130 +1194,11 @@ export default function Manuales({ currentUser }: ManualesProps) {
 
   const isUserAdmin = currentUser.role === 'Admin';
   const [printTarget, setPrintTarget] = useState<'active' | 'all'>('active');
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
 
   const handleDownloadPdf = (target: 'active' | 'all') => {
     setPrintTarget(target);
-    const isAll = target === 'all';
-    const title = isAll 
-      ? 'Manual de Usuario Unificado - DEGRES S.A.S.' 
-      : `Manual de Usuario - ${activeManual.toUpperCase()} - DEGRES S.A.S.`;
-
-    let contentHtml = '';
-    if (isAll) {
-      contentHtml = `
-        <div style="text-align: center; padding: 40px 20px; border: 4px double #1A2D7C; margin-bottom: 30px; border-radius: 8px; background-color: #f8fafc;">
-          <h1 style="color: #1A2D7C; font-size: 24pt; font-weight: bold; margin-bottom: 6px;">DEGRES S.A.S.</h1>
-          <h3 style="color: #F47920; font-size: 13pt; font-weight: bold; margin-top: 0; margin-bottom: 20px; letter-spacing: 1px;">PLATAFORMA CONCILIARIA DEGRES</h3>
-          <div style="width: 100px; height: 3px; background-color: #F47920; margin: 15px auto;"></div>
-          <h2 style="color: #1e293b; font-size: 15pt; font-weight: bold; margin-bottom: 30px; text-transform: uppercase;">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES UNIFICADO</h2>
-          <p style="font-size: 10pt; color: #64748b; margin-bottom: 6px;"><strong>Versión:</strong> 2.0 (Julio 2026)</p>
-          <p style="font-size: 10pt; color: #64748b; margin-bottom: 6px;"><strong>Autor:</strong> Departamento de Tecnología y Contabilidad</p>
-          <p style="font-size: 10pt; color: #64748b; margin-bottom: 20px;"><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
-        </div>
-
-        <div style="page-break-before: always;"></div>
-        <h1 style="color: #1A2D7C; font-size: 16pt; font-weight: bold; border-bottom: 2px solid #F47920; padding-bottom: 6px; margin-bottom: 15px;">ÍNDICE GENERAL DEL MANUAL</h1>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-          <thead>
-            <tr style="background-color: #1A2D7C; color: white;">
-              <th style="padding: 8px; border: 1px solid #cbd5e1; text-align: left;">Sección</th>
-              <th style="padding: 8px; border: 1px solid #cbd5e1; text-align: left;">Módulo Operativo</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td style="padding: 8px; border: 1px solid #cbd5e1; font-weight: bold;">Manual 1</td><td style="padding: 8px; border: 1px solid #cbd5e1;">ROL ADMINISTRADOR (Control Total y Auditoría)</td></tr>
-            <tr><td style="padding: 8px; border: 1px solid #cbd5e1; font-weight: bold;">Manual 2</td><td style="padding: 8px; border: 1px solid #cbd5e1;">ROL TESORERA (Cargue de Extractos Bancarios)</td></tr>
-            <tr><td style="padding: 8px; border: 1px solid #cbd5e1; font-weight: bold;">Manual 3</td><td style="padding: 8px; border: 1px solid #cbd5e1;">ROL CAJERA (Validación de Abonos en Caja)</td></tr>
-            <tr><td style="padding: 8px; border: 1px solid #cbd5e1; font-weight: bold;">Manual 4</td><td style="padding: 8px; border: 1px solid #cbd5e1;">ROL ASESOR COMERCIAL (Seguimiento de Comisiones)</td></tr>
-          </tbody>
-        </table>
-
-        <div style="page-break-before: always;"></div>
-        ${getAdminManualHtml()}
-        <div style="page-break-before: always;"></div>
-        ${getTesoreraManualHtml()}
-        <div style="page-break-before: always;"></div>
-        ${getCajeraManualHtml()}
-        <div style="page-break-before: always;"></div>
-        ${getAsesorManualHtml()}
-      `;
-    } else {
-      if (activeManual === 'admin') contentHtml = getAdminManualHtml();
-      else if (activeManual === 'tesorera') contentHtml = getTesoreraManualHtml();
-      else if (activeManual === 'cajera') contentHtml = getCajeraManualHtml();
-      else contentHtml = getAsesorManualHtml();
-    }
-
-    const printWin = window.open('', '_blank');
-    if (printWin) {
-      printWin.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <title>${title}</title>
-          <style>
-            @media print {
-              @page { size: letter; margin: 15mm; }
-              .no-print { display: none !important; }
-            }
-            body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt; line-height: 1.5; color: #1e293b; margin: 0; padding: 20px; background: #ffffff; }
-            .no-print-bar { background: #1A2D7C; color: white; padding: 12px 20px; margin-bottom: 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); font-family: Arial, sans-serif; }
-            .btn-print { background: #F47920; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 11px; font-family: Arial, sans-serif; letter-spacing: 0.5px; }
-            .btn-print:hover { background: #e06810; }
-            h1 { color: #1A2D7C; font-size: 18pt; font-weight: bold; border-bottom: 2px solid #F47920; padding-bottom: 6px; margin-top: 20px; margin-bottom: 12px; }
-            h2 { color: #1A2D7C; font-size: 13pt; font-weight: bold; margin-top: 18px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; }
-            h3 { color: #F47920; font-size: 11pt; font-weight: bold; margin-top: 12px; margin-bottom: 6px; }
-            p { margin-bottom: 8pt; text-align: justify; }
-            ul, ol { margin-top: 0; margin-bottom: 10pt; padding-left: 20px; }
-            li { margin-bottom: 4pt; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10pt; margin-bottom: 15pt; }
-            th { background-color: #1A2D7C; color: #ffffff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #cbd5e1; font-size: 9.5pt; }
-            td { padding: 8px; border: 1px solid #cbd5e1; font-size: 9.5pt; }
-            .digital-mockup { border: 1.5px solid #cbd5e1; background-color: #ffffff; padding: 12px; margin: 12pt 0; border-radius: 8px; font-family: Arial, sans-serif; text-align: left; }
-            .footer-print { margin-top: 30pt; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 8.5pt; color: #64748b; text-align: center; }
-          </style>
-        </head>
-        <body>
-          <div class="no-print no-print-bar">
-            <div>
-              <div style="font-weight: bold; font-size: 13px;">📄 Documento Oficial Listo para PDF / Impresión</div>
-              <div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">En el cuadro de impresión, seleccione como destino <strong>"Guardar como PDF"</strong> o <strong>"Save as PDF"</strong>.</div>
-            </div>
-            <button class="btn-print" onclick="window.print()">
-              🖨️ Guardar en PDF / Imprimir
-            </button>
-          </div>
-
-          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1A2D7C; padding-bottom: 8px; margin-bottom: 20px;">
-            <div>
-              <div style="font-weight: bold; color: #1A2D7C; font-size: 12pt; text-transform: uppercase;">DEGRES S.A.S.</div>
-              <div style="font-size: 8pt; color: #64748b; text-transform: uppercase;">Plataforma Conciliaria • Manual de Usuario</div>
-            </div>
-            <div style="font-weight: bold; color: #1A2D7C; font-size: 11pt;">DEGRES S.A.S.</div>
-          </div>
-
-          ${contentHtml}
-
-          <div class="footer-print">
-            Documento Oficial Confidencial de DEGRES S.A.S. • Todos los derechos reservados • 2026
-          </div>
-
-          <script>
-            setTimeout(function() {
-              window.focus();
-              window.print();
-            }, 350);
-          </script>
-        </body>
-        </html>
-      `);
-      printWin.document.close();
-    } else {
-      setTimeout(() => {
-        window.print();
-      }, 150);
-    }
+    setPdfPreviewOpen(true);
   };
 
   return (
@@ -1797,7 +1678,106 @@ export default function Manuales({ currentUser }: ManualesProps) {
         </div>
       </div>
 
-      {/* Hidden printable container for PDF generation */}
+      {/* PDF Export & Print Preview Modal */}
+      {pdfPreviewOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-start overflow-y-auto p-3 sm:p-6 no-print-area">
+          <div className="w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]">
+            
+            {/* Modal Top Bar (Hidden on print) */}
+            <div className="bg-[#1A2D7C] text-white p-4 px-6 flex flex-wrap items-center justify-between gap-3 shadow-md border-b-4 border-[#F47920] no-print">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/10 rounded-xl border border-white/20">
+                  <FileText className="h-5 w-5 text-[#F47920]" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black uppercase font-space tracking-wide text-white">
+                    Vista Previa Oficial del Manual para Guardar en PDF
+                  </h3>
+                  <p className="text-[10px] text-slate-300 font-medium">
+                    Elaborado por el <strong>Área de TI</strong> • Al imprimir, elija la opción <strong>"Guardar como PDF"</strong> en su navegador.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex items-center gap-2 bg-[#F47920] hover:bg-[#e06810] text-white font-space font-black uppercase text-[10px] sm:text-[11px] px-4 py-2.5 rounded-xl shadow transition-colors cursor-pointer border-b-2 border-orange-800"
+                >
+                  <Download className="h-4 w-4" />
+                  🖨️ Guardar en PDF / Imprimir
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={() => setPdfPreviewOpen(false)}
+                  className="bg-white/10 hover:bg-white/20 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-white/20"
+                  title="Cerrar vista previa"
+                >
+                  ✕ Cerrar
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body Container */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-100/80 text-slate-800 scrollbar-thin">
+              <div className="printable-document-container max-w-4xl mx-auto bg-white p-6 md:p-12 shadow-lg rounded-xl border border-slate-200 text-xs leading-relaxed font-sans">
+                
+                {/* Document Header */}
+                <div className="flex items-center justify-between border-b-2 border-[#1A2D7C] pb-4 mb-8">
+                  <div>
+                    <h2 className="text-base font-black text-[#1A2D7C] uppercase tracking-wide font-space">DEGRES S.A.S.</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">Plataforma Conciliaria • Documentación Oficial</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs font-black text-[#1A2D7C]">DEGRES S.A.S.</span>
+                    <p className="text-[9px] text-slate-500 font-bold uppercase">Área de TI</p>
+                  </div>
+                </div>
+
+                {/* Content based on print target */}
+                {printTarget === 'all' ? (
+                  <div className="space-y-8">
+                    <div className="text-center py-12 border-4 border-double border-[#1A2D7C] rounded-xl bg-slate-50 mb-8">
+                      <h1 className="text-2xl font-black text-[#1A2D7C] uppercase font-space">DEGRES S.A.S.</h1>
+                      <p className="text-xs font-black tracking-widest text-[#F47920] uppercase mt-1">PLATAFORMA CONCILIARIA DEGRES</p>
+                      <div className="w-16 h-1 bg-[#F47920] mx-auto my-5"></div>
+                      <h2 className="text-sm font-black text-slate-800 uppercase max-w-md mx-auto">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES UNIFICADO</h2>
+                      <div className="text-[10px] text-slate-550 space-y-1 mt-8 font-medium">
+                        <p><strong>Versión:</strong> 2.0 (Julio 2026)</p>
+                        <p><strong>Autor:</strong> Área de TI</p>
+                        <p><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
+                      </div>
+                    </div>
+
+                    <div className="page-break"></div>
+                    <div dangerouslySetInnerHTML={{ __html: getAdminManualHtml() }} />
+                    <div className="page-break"></div>
+                    <div dangerouslySetInnerHTML={{ __html: getTesoreraManualHtml() }} />
+                    <div className="page-break"></div>
+                    <div dangerouslySetInnerHTML={{ __html: getCajeraManualHtml() }} />
+                    <div className="page-break"></div>
+                    <div dangerouslySetInnerHTML={{ __html: getAsesorManualHtml() }} />
+                  </div>
+                ) : (
+                  <div dangerouslySetInnerHTML={{ __html: 
+                    activeManual === 'admin' ? getAdminManualHtml() :
+                    activeManual === 'tesorera' ? getTesoreraManualHtml() :
+                    activeManual === 'cajera' ? getCajeraManualHtml() : getAsesorManualHtml()
+                  }} />
+                )}
+
+                <div className="border-t border-slate-300 pt-4 mt-12 text-center text-[9px] text-slate-400 font-medium">
+                  Documento Oficial Confidencial de DEGRES S.A.S. • Creado por el Área de TI • Todos los derechos reservados • 2026
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden printable container for PDF generation fallback */}
       <div id="printable-area" className="hidden print:block text-slate-900 bg-white p-8">
         <style dangerouslySetInnerHTML={{ __html: `
           @media print {
@@ -1852,7 +1832,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
               <h2 className="text-sm font-black text-slate-800 uppercase max-w-md mx-auto">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES UNIFICADO</h2>
               <div className="text-[10px] text-slate-550 space-y-1 mt-10 font-medium">
                 <p><strong>Versión:</strong> 2.0 (Julio 2026)</p>
-                <p><strong>Autor:</strong> Departamento de Tecnología y Contabilidad</p>
+                <p><strong>Autor:</strong> Área de TI</p>
                 <p><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
               </div>
             </div>
@@ -1875,7 +1855,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
         )}
 
         <div className="border-t border-slate-300 pt-3 mt-12 text-center text-[9px] text-slate-400">
-          Documento Oficial • Confidencial DEGRES S.A.S. • Todos los derechos reservados • 2026
+          Documento Oficial • Confidencial DEGRES S.A.S. • Área de TI • Todos los derechos reservados • 2026
         </div>
       </div>
     </div>
