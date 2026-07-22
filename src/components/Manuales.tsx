@@ -16,7 +16,8 @@ import {
   FileDown,
   ChevronRight,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 
 // Returns beautiful inline-styled HTML mockups for exports
@@ -1199,10 +1200,170 @@ export default function Manuales({ currentUser }: ManualesProps) {
   const handleDownloadPdf = (target: 'active' | 'all') => {
     setPrintTarget(target);
     setPdfPreviewOpen(true);
-    // Auto-trigger browser print dialog after modal mounts
-    setTimeout(() => {
-      window.print();
-    }, 400);
+    // Also trigger dedicated print window for instant clean print without iframe interference
+    handleOpenDedicatedPrintWindow(target);
+  };
+
+  const handleOpenDedicatedPrintWindow = (target: 'active' | 'all') => {
+    const isAll = target === 'all';
+    const title = isAll 
+      ? 'Manual de Usuario Unificado - DEGRES S.A.S.' 
+      : `Manual de Usuario - ${activeManual.toUpperCase()} - DEGRES S.A.S.`;
+
+    let contentHtml = '';
+    if (isAll) {
+      contentHtml = `
+        <div style="text-align: center; padding: 40px 20px; border: 4px double #1A2D7C; margin-bottom: 30px; border-radius: 8px; background-color: #f8fafc;">
+          <h1 style="color: #1A2D7C; font-size: 24pt; font-weight: bold; margin-bottom: 6px; font-family: Arial, sans-serif;">DEGRES S.A.S.</h1>
+          <h3 style="color: #F47920; font-size: 13pt; font-weight: bold; margin-top: 0; margin-bottom: 20px; letter-spacing: 1px; font-family: Arial, sans-serif;">PLATAFORMA CONCILIARIA DEGRES</h3>
+          <div style="width: 100px; height: 3px; background-color: #F47920; margin: 15px auto;"></div>
+          <h2 style="color: #1e293b; font-size: 15pt; font-weight: bold; margin-bottom: 30px; text-transform: uppercase; font-family: Arial, sans-serif;">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES UNIFICADO</h2>
+          <p style="font-size: 10pt; color: #64748b; margin-bottom: 6px; font-family: Arial, sans-serif;"><strong>Versión:</strong> 2.0 (Julio 2026)</p>
+          <p style="font-size: 10pt; color: #64748b; margin-bottom: 6px; font-family: Arial, sans-serif;"><strong>Autor:</strong> Área de TI</p>
+          <p style="font-size: 10pt; color: #64748b; margin-bottom: 20px; font-family: Arial, sans-serif;"><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
+        </div>
+
+        <div style="page-break-before: always;"></div>
+        ${getAdminManualHtml()}
+        <div style="page-break-before: always;"></div>
+        ${getTesoreraManualHtml()}
+        <div style="page-break-before: always;"></div>
+        ${getCajeraManualHtml()}
+        <div style="page-break-before: always;"></div>
+        ${getAsesorManualHtml()}
+      `;
+    } else {
+      if (activeManual === 'admin') contentHtml = getAdminManualHtml();
+      else if (activeManual === 'tesorera') contentHtml = getTesoreraManualHtml();
+      else if (activeManual === 'cajera') contentHtml = getCajeraManualHtml();
+      else contentHtml = getAsesorManualHtml();
+    }
+
+    try {
+      const printWin = window.open('', '_blank');
+      if (printWin) {
+        printWin.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>${title}</title>
+            <style>
+              @media print {
+                @page { size: letter portrait; margin: 12mm 15mm 15mm 15mm; }
+                .no-print { display: none !important; }
+                body { padding: 0 !important; margin: 0 !important; background: #ffffff !important; }
+              }
+              body {
+                font-family: Arial, Helvetica, sans-serif;
+                font-size: 10pt;
+                line-height: 1.5;
+                color: #1e293b;
+                margin: 0;
+                padding: 24px;
+                background: #f8fafc;
+              }
+              .document-wrapper {
+                max-width: 900px;
+                margin: 0 auto;
+                background: #ffffff;
+                padding: 40px;
+                border-radius: 12px;
+                box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+                border: 1px solid #e2e8f0;
+              }
+              @media print {
+                .document-wrapper {
+                  box-shadow: none !important;
+                  border: none !important;
+                  padding: 0 !important;
+                  max-width: 100% !important;
+                }
+              }
+              .no-print-bar {
+                background: #1A2D7C;
+                color: white;
+                padding: 14px 24px;
+                margin-bottom: 24px;
+                border-radius: 12px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                box-shadow: 0 4px 12px rgba(26,45,124,0.2);
+                font-family: Arial, sans-serif;
+              }
+              .btn-print {
+                background: #F47920;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-weight: bold;
+                cursor: pointer;
+                text-transform: uppercase;
+                font-size: 11px;
+                font-family: Arial, sans-serif;
+                letter-spacing: 0.5px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+              }
+              .btn-print:hover { background: #e06810; }
+              h1 { color: #1A2D7C; font-size: 18pt; font-weight: bold; border-bottom: 2px solid #F47920; padding-bottom: 6px; margin-top: 20px; margin-bottom: 12px; }
+              h2 { color: #1A2D7C; font-size: 13pt; font-weight: bold; margin-top: 18px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; }
+              h3 { color: #F47920; font-size: 11pt; font-weight: bold; margin-top: 12px; margin-bottom: 6px; }
+              p { margin-bottom: 8pt; text-align: justify; }
+              ul, ol { margin-top: 0; margin-bottom: 10pt; padding-left: 20px; }
+              li { margin-bottom: 4pt; }
+              table { width: 100%; border-collapse: collapse; margin-top: 10pt; margin-bottom: 15pt; }
+              th { background-color: #1A2D7C; color: #ffffff; font-weight: bold; text-align: left; padding: 8px; border: 1px solid #cbd5e1; font-size: 9.5pt; }
+              td { padding: 8px; border: 1px solid #cbd5e1; font-size: 9.5pt; }
+              .digital-mockup { border: 1.5px solid #cbd5e1; background-color: #ffffff; padding: 12px; margin: 12pt 0; border-radius: 8px; font-family: Arial, sans-serif; text-align: left; }
+              .footer-print { margin-top: 30pt; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 8.5pt; color: #64748b; text-align: center; }
+            </style>
+          </head>
+          <body>
+            <div class="no-print no-print-bar">
+              <div>
+                <div style="font-weight: bold; font-size: 14px;">📄 Documento Oficial Listo para Guardar en PDF</div>
+                <div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">En el cuadro de impresión de su navegador, elija como destino <strong>"Guardar como PDF"</strong>.</div>
+              </div>
+              <button class="btn-print" onclick="window.print()">
+                🖨️ Guardar en PDF / Imprimir
+              </button>
+            </div>
+
+            <div class="document-wrapper">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1A2D7C; padding-bottom: 10px; margin-bottom: 24px;">
+                <div>
+                  <div style="font-weight: bold; color: #1A2D7C; font-size: 13pt; text-transform: uppercase;">DEGRES S.A.S.</div>
+                  <div style="font-size: 8.5pt; color: #64748b; text-transform: uppercase;">Plataforma Conciliaria • Documentación Oficial</div>
+                </div>
+                <div style="text-align: right;">
+                  <div style="font-weight: bold; color: #1A2D7C; font-size: 11pt;">DEGRES S.A.S.</div>
+                  <div style="font-size: 8.5pt; color: #F47920; font-weight: bold; text-transform: uppercase;">Área de TI</div>
+                </div>
+              </div>
+
+              ${contentHtml}
+
+              <div class="footer-print">
+                Documento Oficial Confidencial de DEGRES S.A.S. • Creado por el Área de TI • Todos los derechos reservados • 2026
+              </div>
+            </div>
+
+            <script>
+              setTimeout(function() {
+                window.focus();
+                window.print();
+              }, 400);
+            </script>
+          </body>
+          </html>
+        `);
+        printWin.document.close();
+      }
+    } catch (e) {
+      console.warn("Pop-up window was blocked, falling back to modal print", e);
+    }
   };
 
   return (
@@ -1703,7 +1864,17 @@ export default function Manuales({ currentUser }: ManualesProps) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleOpenDedicatedPrintWindow(printTarget)}
+                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-space font-bold uppercase text-[10px] sm:text-[11px] px-3.5 py-2.5 rounded-xl border border-white/20 shadow transition-colors cursor-pointer"
+                  title="Abrir en una ventana independiente limpia para guardar como PDF"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 text-[#F47920]" />
+                  🌐 Abrir en Nueva Pestaña
+                </button>
+
                 <button
                   type="button"
                   onClick={() => window.print()}

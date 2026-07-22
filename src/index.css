@@ -25,13 +25,16 @@
 
 /* Print Styles for PDF Generation and Document Printing */
 @media print {
-  /* 1. Reset all top-level containers so multi-page printing flows naturally */
+  /* 1. Force all parent elements to overflow visible so content isn't clipped or blank */
   html,
   body,
   #root,
   #app-root-shell,
   main,
-  #active-view-container {
+  div,
+  section,
+  article,
+  aside {
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
@@ -63,7 +66,7 @@
     display: none !important;
   }
 
-  /* 3. Reset preview modal so it flows directly onto the print canvas */
+  /* 3. Reset preview modal wrapper so it flows natively onto the print canvas */
   .pdf-preview-modal-backdrop {
     position: static !important;
     inset: auto !important;
@@ -117,6 +120,7 @@
     font-family: Arial, Helvetica, sans-serif !important;
     font-size: 10pt !important;
     line-height: 1.5 !important;
+    display: block !important;
   }
 
   /* Page breaks */
@@ -125,7 +129,7 @@
     break-before: page !important;
   }
 
-  /* Keep headings with their section content */
+  /* Keep headings with section content */
   h1, h2, h3, h4 {
     page-break-after: avoid !important;
     break-after: avoid !important;
