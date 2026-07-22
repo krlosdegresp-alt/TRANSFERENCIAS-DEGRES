@@ -25,92 +25,44 @@
 
 /* Print Styles for PDF Generation and Document Printing */
 @media print {
-  /* 1. Force all parent elements to overflow visible so content isn't clipped or blank */
+  @page {
+    size: letter portrait;
+    margin: 10mm 12mm 12mm 12mm;
+  }
+
+  /* 1. Reset root page geometry */
   html,
-  body,
-  #root,
-  #app-root-shell,
-  main,
-  div,
-  section,
-  article,
-  aside {
+  body {
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
     overflow: visible !important;
-    position: static !important;
-    display: block !important;
     background: #ffffff !important;
     color: #0f172a !important;
     margin: 0 !important;
     padding: 0 !important;
-    box-shadow: none !important;
   }
 
-  @page {
-    size: letter portrait;
-    margin: 12mm 15mm 15mm 15mm;
+  /* 2. Hide all page contents by default to prevent overflow/blank pages */
+  body * {
+    visibility: hidden !important;
   }
 
-  /* 2. Hide web navigation, headers, footers, buttons, and sidebars */
-  header,
-  footer,
-  nav,
-  aside,
-  button,
-  .no-print,
-  .no-print-area,
-  #chat-soporte-widget,
-  #google-meet-widget {
-    display: none !important;
+  /* 3. Make ONLY the printable document container and its contents visible */
+  .printable-document-container,
+  .printable-document-container *,
+  #printable-area,
+  #printable-area * {
+    visibility: visible !important;
   }
 
-  /* 3. Reset preview modal wrapper so it flows natively onto the print canvas */
-  .pdf-preview-modal-backdrop {
-    position: static !important;
-    inset: auto !important;
-    background: #ffffff !important;
-    padding: 0 !important;
-    margin: 0 !important;
+  /* 4. Position printable document at absolute top-left of the print paper */
+  .printable-document-container,
+  #printable-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
     width: 100% !important;
-    height: auto !important;
-    max-height: none !important;
-    overflow: visible !important;
-    display: block !important;
-    backdrop-filter: none !important;
-  }
-
-  .pdf-preview-modal-card {
-    max-width: 100% !important;
-    width: 100% !important;
-    height: auto !important;
-    max-height: none !important;
-    border: none !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    background: #ffffff !important;
-    overflow: visible !important;
-    display: block !important;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-
-  .pdf-preview-modal-body {
-    overflow: visible !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    background: #ffffff !important;
-    display: block !important;
-    height: auto !important;
-    max-height: none !important;
-  }
-
-  /* 4. Format the printable document container */
-  .printable-document-container {
-    position: static !important;
-    width: 100% !important;
-    max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     box-shadow: none !important;
@@ -120,11 +72,42 @@
     font-family: Arial, Helvetica, sans-serif !important;
     font-size: 10pt !important;
     line-height: 1.5 !important;
-    display: block !important;
   }
 
-  /* Page breaks */
-  .page-break {
+  /* Hide UI elements explicitly */
+  .no-print,
+  .no-print-area,
+  header,
+  footer,
+  nav,
+  aside,
+  button,
+  #chat-soporte-widget,
+  #google-meet-widget {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Reset modal containers so they don't clip printable content */
+  .pdf-preview-modal-backdrop,
+  .pdf-preview-modal-card,
+  .pdf-preview-modal-body {
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Page break rules */
+  .page-break,
+  .print-page-break {
     page-break-before: always !important;
     break-before: page !important;
   }

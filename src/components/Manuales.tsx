@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import { User } from '../types';
 import { logoBase64 } from '../assets/images/logoBase64';
 import { 
@@ -17,7 +19,8 @@ import {
   ChevronRight,
   CheckCircle2,
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
 
 // Returns beautiful inline-styled HTML mockups for exports
@@ -1196,12 +1199,121 @@ export default function Manuales({ currentUser }: ManualesProps) {
   const isUserAdmin = currentUser.role === 'Admin';
   const [printTarget, setPrintTarget] = useState<'active' | 'all'>('active');
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
+  const handleGenerateDirectPdf = async (target: 'active' | 'all') => {
+    setIsGeneratingPdf(true);
+    const isAll = target === 'all';
+    const roleName = isAll ? 'Unificado_Completo' : activeManual.toUpperCase();
+
+    let contentHtml = '';
+    if (isAll) {
+      contentHtml = `
+        <div style="text-align: center; padding: 30px 20px; border: 4px double #1A2D7C; margin-bottom: 24px; border-radius: 8px; background-color: #f8fafc;">
+          <h1 style="color: #1A2D7C; font-size: 20pt; font-weight: bold; margin-bottom: 4px; font-family: Arial, sans-serif;">DEGRES S.A.S.</h1>
+          <h3 style="color: #F47920; font-size: 11pt; font-weight: bold; margin-top: 0; margin-bottom: 12px; letter-spacing: 1px; font-family: Arial, sans-serif;">PLATAFORMA CONCILIARIA DEGRES</h3>
+          <div style="width: 80px; height: 3px; background-color: #F47920; margin: 10px auto;"></div>
+          <h2 style="color: #1e293b; font-size: 13pt; font-weight: bold; margin-bottom: 16px; text-transform: uppercase; font-family: Arial, sans-serif;">MANUAL OPERATIVO DE CONCILIACIÓN BANCARIA Y CONTROL DE TRANSACCIONES UNIFICADO</h2>
+          <p style="font-size: 9.5pt; color: #64748b; margin-bottom: 4px;"><strong>Versión:</strong> 2.0 (Julio 2026)</p>
+          <p style="font-size: 9.5pt; color: #64748b; margin-bottom: 4px;"><strong>Autor:</strong> Área de TI</p>
+          <p style="font-size: 9.5pt; color: #64748b; margin-bottom: 12px;"><strong>Sedes:</strong> Guayabal, Sabaneta, Naranjal • Medellín, Colombia</p>
+        </div>
+        ${getAdminManualHtml()}
+        <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px;"></div>
+        ${getTesoreraManualHtml()}
+        <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px;"></div>
+        ${getCajeraManualHtml()}
+        <div style="margin-top: 30px; border-top: 2px dashed #cbd5e1; padding-top: 20px;"></div>
+        ${getAsesorManualHtml()}
+      `;
+    } else {
+      if (activeManual === 'admin') contentHtml = getAdminManualHtml();
+      else if (activeManual === 'tesorera') contentHtml = getTesoreraManualHtml();
+      else if (activeManual === 'cajera') contentHtml = getCajeraManualHtml();
+      else contentHtml = getAsesorManualHtml();
+    }
+
+    const tempDiv = document.createElement('div');
+    tempDiv.style.position = 'absolute';
+    tempDiv.style.left = '-9999px';
+    tempDiv.style.top = '0';
+    tempDiv.style.width = '800px';
+    tempDiv.style.backgroundColor = '#ffffff';
+    tempDiv.style.padding = '32px';
+    tempDiv.style.color = '#1e293b';
+    tempDiv.style.fontFamily = 'Arial, Helvetica, sans-serif';
+    tempDiv.style.fontSize = '12px';
+    tempDiv.style.lineHeight = '1.6';
+
+    const headerHtml = `
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1A2D7C; padding-bottom: 10px; margin-bottom: 20px;">
+        <div>
+          <div style="font-weight: bold; color: #1A2D7C; font-size: 15px; text-transform: uppercase;">DEGRES S.A.S.</div>
+          <div style="font-size: 10px; color: #64748b; text-transform: uppercase;">Plataforma Conciliaria • Documento Oficial de TI</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-weight: bold; color: #1A2D7C; font-size: 12px;">DEGRES S.A.S.</div>
+          <div style="font-size: 10px; color: #F47920; font-weight: bold; text-transform: uppercase;">Área de TI • 2026</div>
+        </div>
+      </div>
+    `;
+
+    const footerHtml = `
+      <div style="margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 9px; color: #64748b; text-align: center;">
+        Documento Confidencial de DEGRES S.A.S. • Área de TI • Todos los derechos reservados • 2026
+      </div>
+    `;
+
+    tempDiv.innerHTML = headerHtml + contentHtml + footerHtml;
+    document.body.appendChild(tempDiv);
+
+    try {
+      const canvas = await html2canvas(tempDiv, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'letter'
+      });
+
+      const imgWidth = 215.9;
+      const pageHeight = 279.4;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 2) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`Manual_Usuario_${roleName}_DEGRES.pdf`);
+    } catch (err) {
+      console.error("Error al generar PDF:", err);
+      alert("No se pudo generar la descarga directa. Se abrirá la vista previa para imprimir.");
+      setPdfPreviewOpen(true);
+    } finally {
+      if (document.body.contains(tempDiv)) {
+        document.body.removeChild(tempDiv);
+      }
+      setIsGeneratingPdf(false);
+    }
+  };
 
   const handleDownloadPdf = (target: 'active' | 'all') => {
     setPrintTarget(target);
-    setPdfPreviewOpen(true);
-    // Also trigger dedicated print window for instant clean print without iframe interference
-    handleOpenDedicatedPrintWindow(target);
+    handleGenerateDirectPdf(target);
   };
 
   const handleOpenDedicatedPrintWindow = (target: 'active' | 'all') => {
@@ -1867,21 +1979,31 @@ export default function Manuales({ currentUser }: ManualesProps) {
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => handleOpenDedicatedPrintWindow(printTarget)}
-                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-space font-bold uppercase text-[10px] sm:text-[11px] px-3.5 py-2.5 rounded-xl border border-white/20 shadow transition-colors cursor-pointer"
-                  title="Abrir en una ventana independiente limpia para guardar como PDF"
+                  onClick={() => handleGenerateDirectPdf(printTarget)}
+                  className="flex items-center gap-2 bg-[#F47920] hover:bg-[#e06810] text-white font-space font-black uppercase text-[10px] sm:text-[11px] px-4 py-2.5 rounded-xl shadow transition-colors cursor-pointer border-b-2 border-orange-800"
+                  title="Descargar archivo .pdf directamente a su equipo"
                 >
-                  <ExternalLink className="h-3.5 w-3.5 text-[#F47920]" />
-                  🌐 Abrir en Nueva Pestaña
+                  <Download className="h-4 w-4" />
+                  📥 Descargar PDF Directo
                 </button>
 
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="flex items-center gap-2 bg-[#F47920] hover:bg-[#e06810] text-white font-space font-black uppercase text-[10px] sm:text-[11px] px-4 py-2.5 rounded-xl shadow transition-colors cursor-pointer border-b-2 border-orange-800"
+                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-space font-bold uppercase text-[10px] sm:text-[11px] px-3.5 py-2.5 rounded-xl border border-white/20 shadow transition-colors cursor-pointer"
+                  title="Imprimir con el menú nativo del navegador"
                 >
-                  <Download className="h-4 w-4" />
-                  🖨️ Guardar en PDF / Imprimir
+                  🖨️ Imprimir
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenDedicatedPrintWindow(printTarget)}
+                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 text-white font-space font-bold uppercase text-[10px] sm:text-[11px] px-3.5 py-2.5 rounded-xl border border-white/20 shadow transition-colors cursor-pointer"
+                  title="Abrir en una ventana independiente limpia para guardar como PDF"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 text-[#F47920]" />
+                  🌐 Nueva Ventana
                 </button>
                 
                 <button
@@ -2033,6 +2155,19 @@ export default function Manuales({ currentUser }: ManualesProps) {
           Documento Oficial • Confidencial DEGRES S.A.S. • Área de TI • Todos los derechos reservados • 2026
         </div>
       </div>
+
+      {/* Loading Overlay during client-side PDF generation */}
+      {isGeneratingPdf && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center p-4 text-white">
+          <div className="bg-slate-800 p-6 sm:p-8 rounded-2xl border border-slate-700 shadow-2xl flex flex-col items-center text-center max-w-sm animate-in fade-in zoom-in duration-200">
+            <Loader2 className="h-10 w-10 text-[#F47920] animate-spin mb-4" />
+            <h3 className="text-base font-bold font-space text-white mb-1">Generando PDF Oficial DEGRES</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Procesando el documento en alta resolución... El archivo se descargará automáticamente a su equipo en unos segundos.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
