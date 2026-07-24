@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { uploadBankTransactions, getTransactions, getUploadBatches, revertUploadBatch, subscribeToDatabase } from '../firebase';
-import { parseExcelBankFile, esMovimientoIrrelevante, detectarSede } from '../utils/parser-excel';
+import { uploadBankTransactions, getTransactions, getUploadBatches, revertUploadBatch, subscribeToDatabase, importarCierresCajaBulk } from '../firebase';
+import { parseExcelBankFile, parseExcelCierres, esMovimientoIrrelevante, detectarSede } from '../utils/parser-excel';
 import JSZip from 'jszip';
 import { formatCOP, formatDateHuman } from '../utils/formato';
-import { Transaction, Sede, User, UploadBatch } from '../types';
+import { Transaction, Sede, User, UploadBatch, CierreCaja } from '../types';
 import { 
   FileSpreadsheet, 
   Upload, 
@@ -36,6 +36,7 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [targetSede, setTargetSede] = useState<Sede>('Desconocida');
   const [parsedQueue, setParsedQueue] = useState<Transaction[]>([]);
+  const [parsedCierres, setParsedCierres] = useState<CierreCaja[]>([]);
   const [uploadSummary, setUploadSummary] = useState<{ imported: number; duplicates: number } | null>(null);
   const [batches, setBatches] = useState<UploadBatch[]>(getUploadBatches());
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,6 +144,7 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
   const handleParseFile = async (file: File) => {
     setLoading(true);
     setParsedQueue([]);
+    setParsedCierres([]);
     setUploadSummary(null);
 
     try {
@@ -183,7 +185,10 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
 
       // Parse spreadsheet using the custom parser
       const list = parseExcelBankFile(buffer, targetSede);
+      const cierres = parseExcelCierres(buffer);
+
       setParsedQueue(list);
+      setParsedCierres(cierres);
     } catch (err: any) {
       console.error('Error parsing spreadsheet file', err);
       const msg = err?.message || 'Asegúrate de subir un archivo de formato .xlsx, .xls, .csv o un .zip válido.';
@@ -194,24 +199,37 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
   };
 
   const handleCommitQueue = async () => {
-    if (parsedQueue.length === 0) return;
+    if (parsedQueue.length === 0 && parsedCierres.length === 0) return;
     setLoading(true);
     try {
-      // Trigger upload with duplication filter, passing real filename and file blob for Firebase Storage
-      const res = await uploadBankTransactions(
-        parsedQueue, 
-        currentUser.nombre, 
-        selectedFile?.name || 'archivo_movimientos.xlsx',
-        selectedFile
-      );
+      let res = { imported: 0, duplicates: 0 };
+      if (parsedQueue.length > 0) {
+        res = await uploadBankTransactions(
+          parsedQueue, 
+          currentUser.nombre, 
+          selectedFile?.name || 'archivo_movimientos.xlsx',
+          selectedFile
+        );
+      }
+
+      let cierresImportadosCount = 0;
+      if (parsedCierres.length > 0) {
+        cierresImportadosCount = importarCierresCajaBulk(parsedCierres);
+      }
+
       setUploadSummary(res);
       setParsedQueue([]);
+      setParsedCierres([]);
       setSelectedFile(null);
       setBatches(getUploadBatches()); // Update local file upload history
       onRefreshData();
+
+      if (cierresImportadosCount > 0) {
+        triggerAlert('Cierres Importados', `¡Se importaron exitosamente ${cierresImportadosCount} registros de Cierre de Caja seleccionados desde el archivo!`, 'success');
+      }
     } catch (err) {
       console.error(err);
-      triggerAlert('Error', 'No se pudieron registrar las transacciones en la base de datos de Firestore.', 'error');
+      triggerAlert('Error', 'No se pudieron registrar los datos en la base de datos de Firestore.', 'error');
     } finally {
       setLoading(false);
     }

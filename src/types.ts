@@ -56,8 +56,15 @@ export interface CierreCaja {
   fecha: string; // YYYY-MM-DD
   sede: Sede;
   nombreCajera: string;
+  numeroIdentificados: number;
+  totalIdentificado: number;
+  totalAplicativo: number;
+  coincide: boolean;
+  motivoDiferencia?: string | null;
+  diferencia?: number;
   totalDeclarado: number;
   fechaCreacion: string;
+  bloqueado: boolean;
   solicitaDesbloqueo?: boolean;
   motivoDesbloqueo?: string | null;
 }

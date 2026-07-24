@@ -83,6 +83,9 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const [motivoDesbloqueoLocal, setMotivoDesbloqueoLocal] = useState('');
   const [mostrarFormSolicitud, setMostrarFormSolicitud] = useState(false);
   const [cierresCajaList, setCierresCajaList] = useState<CierreCaja[]>(() => getCierresCaja());
+  const [showCierreModal, setShowCierreModal] = useState(false);
+  const [coincideSeleccion, setCoincideSeleccion] = useState<boolean | null>(true);
+  const [motivoDiferenciaInput, setMotivoDiferenciaInput] = useState('');
 
   // Subscription to keep closures state synchronized with Firestore events
   useEffect(() => {
@@ -209,10 +212,13 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const bankPaymentsForDate = transactions.filter(
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   );
-  const totalBanco = bankPaymentsForDate.reduce((sum, tx) => sum + tx.valor, 0);
-  const valorDeclaradoNum = valorCierre ? parseFloat(valorCierre) : 0;
-  const noDeclaradoAun = valorCierre === '';
-  const diferencia = valorDeclaradoNum - totalBanco;
+  const identifiedPaymentsForDate = bankPaymentsForDate.filter(t => t.identificada);
+
+  const numIdentificadosCierre = identifiedPaymentsForDate.length;
+  const totalIdentificadoCierre = identifiedPaymentsForDate.reduce((sum, tx) => sum + tx.valor, 0);
+  const totalAplicativoCierre = bankPaymentsForDate.reduce((sum, tx) => sum + tx.valor, 0);
+  const diferenciaCierre = totalIdentificadoCierre - totalAplicativoCierre;
+
   const activeCierres = cierresCajaList;
   const currentCierre = activeCierres.find(c => c.fecha === cierreFecha && c.sede === cierreSede);
   const isAlreadyClosed = !!currentCierre;
@@ -223,27 +229,47 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
       alert('Este cierre de caja ya se encuentra registrado y bloqueado para esta fecha y sede.');
       return;
     }
-    if (isNaN(valorDeclaradoNum) || valorDeclaradoNum < 0) {
-      alert('Por favor ingresa un monto válido (mayor o igual a 0).');
+
+    if (coincideSeleccion === null) {
+      alert('Por favor selecciona si el valor identificado coincide con el aplicativo (SÍ o NO).');
       return;
     }
 
-    const confirmMessage = `¿Está seguro de que desea guardar el cierre de caja?\n\n` +
+    if (coincideSeleccion === false && !motivoDiferenciaInput.trim()) {
+      alert('Por favor ingresa el motivo / observaciones de por qué no coincide el cierre.');
+      return;
+    }
+
+    const confirmMessage = `¿Está seguro de que desea guardar y bloquear el cierre de caja?\n\n` +
       `- Sede: ${cierreSede}\n` +
       `- Fecha: ${cierreFecha}\n` +
-      `- Monto Declarado (Sistema Interno): ${formatCOP(valorDeclaradoNum)}\n` +
-      `- Total Banco (Aplicativo): ${formatCOP(totalBanco)}\n` +
-      `- Diferencia (Descuadre): ${(diferencia >= 0 ? '+' : '')}${formatCOP(diferencia)}\n\n` +
-      `¿Desea registrar esta información en el sistema de conciliación?`;
+      `- N° Transacciones Identificadas: ${numIdentificadosCierre}\n` +
+      `- Valor Total Identificado: ${formatCOP(totalIdentificadoCierre)}\n` +
+      `- Valor en Aplicativo: ${formatCOP(totalAplicativoCierre)}\n` +
+      `- Coincide con Aplicativo: ${coincideSeleccion ? 'SÍ' : 'NO'}\n` +
+      (coincideSeleccion ? '' : `- Motivo / Observaciones: ${motivoDiferenciaInput.trim()}\n`) +
+      `\nEsta acción guardará y bloqueará el cierre de caja.`;
 
     if (!confirm(confirmMessage)) {
       return;
     }
 
-    registrarCierreCaja(cierreFecha, cierreSede, currentUser.nombre, valorDeclaradoNum);
-    alert(`¡Cierre de caja guardado con éxito!\n\nSede: ${cierreSede}\nFecha: ${cierreFecha}\nTotal Declarado (Sistema Interno): ${formatCOP(valorDeclaradoNum)}\nTotal Banco (Aplicativo): ${formatCOP(totalBanco)}\nDiferencia: ${formatCOP(diferencia)}`);
+    registrarCierreCaja(
+      cierreFecha, 
+      cierreSede, 
+      currentUser.nombre, 
+      numIdentificadosCierre,
+      totalIdentificadoCierre,
+      totalAplicativoCierre,
+      coincideSeleccion,
+      coincideSeleccion ? null : motivoDiferenciaInput.trim(),
+      true
+    );
+
+    alert(`¡Cierre de caja guardado y bloqueado con éxito!\n\nSede: ${cierreSede}\nFecha: ${cierreFecha}\nIdentificados: ${numIdentificadosCierre} (${formatCOP(totalIdentificadoCierre)})\nAplicativo: ${formatCOP(totalAplicativoCierre)}\nCoincide: ${coincideSeleccion ? 'SÍ' : 'NO'}`);
     setCierresCajaList(getCierresCaja());
     onRefreshData();
+    setShowCierreModal(false);
   };
 
   const handleSolicitarDesbloqueo = (e: React.FormEvent) => {
@@ -304,20 +330,29 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
           </p>
         </div>
 
-        {/* Counter Summary */}
-        <div className="flex gap-4">
-          <div className="bg-white border-2 border-slate-200 px-6 py-3 rounded-2xl text-right min-w-[140px] shadow-sm">
-            <p className="text-[10px] uppercase text-slate-400 font-extrabold tracking-widest leading-none">PENDIENTES HOY</p>
-            <p id="stat-pending-count" className="text-2xl font-black text-[#F47920] font-space mt-1 leading-none">
+        {/* Counter Summary & Action Button */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="bg-white border-2 border-slate-200 px-5 py-2.5 rounded-2xl text-right min-w-[130px] shadow-sm">
+            <p className="text-[9.5px] uppercase text-slate-400 font-extrabold tracking-widest leading-none">PENDIENTES HOY</p>
+            <p id="stat-pending-count" className="text-xl font-black text-[#F47920] font-space mt-1 leading-none">
               {transactions.filter(t => !t.identificada && !t.esHistorico).length.toString().padStart(2, '0')}
             </p>
           </div>
-          <div className="bg-[#1A2D7C] text-white px-6 py-3 rounded-2xl text-right min-w-[140px] shadow-lg">
-            <p className="text-[10px] uppercase text-white/70 font-extrabold tracking-widest leading-none">IDENTIFICADAS</p>
-            <p id="stat-solved-count" className="text-2xl font-black text-white font-space mt-1 leading-none">
+          <div className="bg-[#1A2D7C] text-white px-5 py-2.5 rounded-2xl text-right min-w-[130px] shadow-lg">
+            <p className="text-[9.5px] uppercase text-white/70 font-extrabold tracking-widest leading-none">IDENTIFICADAS</p>
+            <p id="stat-solved-count" className="text-xl font-black text-white font-space mt-1 leading-none">
               {transactions.filter(t => t.identificada && !t.esHistorico).length.toString().padStart(2, '0')}
             </p>
           </div>
+
+          <button
+            id="btn-diligenciar-cierre-caja"
+            onClick={() => setShowCierreModal(true)}
+            className="bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black px-5 py-3 rounded-2xl shadow-lg flex items-center gap-2 text-xs uppercase tracking-wider transition-all hover:scale-[1.02] active:scale-[0.98] border border-emerald-400/30 cursor-pointer"
+          >
+            <Receipt className="h-5 w-5 text-emerald-200" />
+            <span>Diligenciar Cierre de Caja</span>
+          </button>
         </div>
       </div>
 
@@ -582,6 +617,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                   <th className="px-6 py-4.5">Estado / Llave</th>
                   <th className="px-6 py-4.5">Sede Destinataria</th>
                   <th className="px-6 py-4.5">Fecha y Hora</th>
+                  <th className="px-6 py-4.5"># Comprobante / Ref</th>
                   <th className="px-6 py-4.5">Descripción de Movimiento</th>
                   <th className="px-6 py-4.5 text-right">Valor COP</th>
                   <th className="px-6 py-4.5 text-center">Acciones de Validación</th>
@@ -631,6 +667,28 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                         {tx.hora && <div className="text-[10px] mt-0.5 text-slate-400 font-bold">{tx.hora}</div>}
                       </td>
 
+                      {/* Dedicated # Comprobante / Ref Column */}
+                      <td className="px-6 py-4.5 font-mono">
+                        {tx.comprobante ? (
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="inline-block bg-orange-100 text-[#D95D00] border border-orange-300 px-2.5 py-1 rounded-lg text-xs font-black tracking-wider shadow-xs" title="Número de comprobante bancario">
+                              #{tx.comprobante}
+                            </span>
+                            {tx.oficina && (
+                              <span className="text-[9px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded">
+                                OFIC: {tx.oficina}
+                              </span>
+                            )}
+                          </div>
+                        ) : tx.oficina ? (
+                          <span className="inline-block bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded-lg text-[11px] font-bold">
+                            OFIC: {tx.oficina}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-semibold italic">Sin # Comp</span>
+                        )}
+                      </td>
+
                       {/* Concept & Core metadata */}
                       <td className="px-6 py-4.5 max-w-[230px]" title={tx.descripcion}>
                         <p className="text-[11px] font-mono text-slate-500 uppercase leading-snug break-words font-medium">{tx.descripcion}</p>
@@ -640,18 +698,8 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                               PAGO QR
                             </span>
                           )}
-                          {tx.oficina && (
-                            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold" title="Código de Oficina del Banco">
-                              OFIC: {tx.oficina}
-                            </span>
-                          )}
-                          {tx.comprobante && (
-                            <span className="text-[9px] bg-orange-50 text-[#F47920] border border-orange-100 px-1.5 py-0.5 rounded font-bold" title="Número de comprobante bancario">
-                              COMP: {tx.comprobante}
-                            </span>
-                          )}
                           {!tx.oficina && !tx.comprobante && !(tx.esQR || tx.descripcion.toUpperCase().includes('QR') || tx.descripcion.toUpperCase().includes('COBRU')) && (
-                            <p className="text-[9px] text-[#F47920] font-bold uppercase tracking-wider font-space">ABONO REGULAR</p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider font-space">ABONO REGULAR</p>
                           )}
                         </div>
                       </td>
@@ -1112,6 +1160,262 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
           </div>
         );
       })()}
+
+      {/* MODAL DILIGENCIAR CIERRE DE CAJA */}
+      {showCierreModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full p-6 md:p-8 animate-in zoom-in-95 duration-200 relative overflow-hidden">
+            {/* Top decorative stripe */}
+            <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-600 to-[#1A2D7C]" />
+
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3 text-[#1A2D7C]">
+                <div className="p-2.5 bg-emerald-50 rounded-2xl border border-emerald-100">
+                  <Receipt className="h-6 w-6 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg uppercase tracking-tight font-space">Diligenciar Cierre de Caja</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">CONCILIACIÓN DIARIA DE RECAUDO Y CAJA FÍSICA</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowCierreModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+
+            {/* Selectors for Fecha & Sede */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 tracking-wider mb-1.5 flex items-center gap-1">
+                  <Building2 className="h-3.5 w-3.5 text-[#1A2D7C]" />
+                  Sede Física:
+                </label>
+                <select
+                  value={cierreSede}
+                  onChange={(e) => setCierreSede(e.target.value as Sede)}
+                  disabled={currentUser.role === 'Cajera' && !!currentUser.sede}
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#1A2D7C]"
+                >
+                  <option value="Guayabal">Guayabal</option>
+                  <option value="Sabaneta">Sabaneta</option>
+                  <option value="Naranjal">Naranjal</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 tracking-wider mb-1.5 flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5 text-[#1A2D7C]" />
+                  Fecha de Cierre:
+                </label>
+                <input
+                  type="date"
+                  value={cierreFecha}
+                  onChange={(e) => setCierreFecha(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#1A2D7C]"
+                />
+              </div>
+            </div>
+
+            {isAlreadyClosed && currentCierre ? (
+              /* LOCKED CLOSURE STATE VIEW */
+              <div className="space-y-4">
+                <div className="bg-amber-50 border-2 border-amber-200/80 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-900 border-b border-amber-200 pb-2">
+                    <Lock className="h-5 w-5 text-amber-600" />
+                    <span className="font-black text-xs uppercase tracking-wider">Cierre Guardado y Bloqueado</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase block">Cajera / Usuario:</span>
+                      <span className="font-black text-slate-800">{currentCierre.nombreCajera}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase block">N° Identificados:</span>
+                      <span className="font-mono font-black text-emerald-700">{currentCierre.numeroIdentificados ?? numIdentificadosCierre} txs</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase block">Total Identificado:</span>
+                      <span className="font-mono font-black text-emerald-700">{formatCOP(currentCierre.totalIdentificado ?? currentCierre.totalDeclarado)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase block">Total Aplicativo:</span>
+                      <span className="font-mono font-black text-[#1A2D7C]">{formatCOP(currentCierre.totalAplicativo ?? totalAplicativoCierre)}</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-600 uppercase">¿Coincidió con Aplicativo?:</span>
+                    <span className={`font-black px-2.5 py-0.5 rounded-full uppercase text-[10px] ${currentCierre.coincide !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      {currentCierre.coincide !== false ? 'SÍ, COINCIDIÓ' : 'NO COINCIDIÓ'}
+                    </span>
+                  </div>
+
+                  {currentCierre.motivoDiferencia && (
+                    <div className="bg-white p-3 rounded-xl border border-amber-200 text-xs">
+                      <span className="font-bold text-slate-500 uppercase text-[9.5px] block mb-0.5">Motivo / Observaciones:</span>
+                      <p className="text-slate-700 italic font-semibold">{currentCierre.motivoDiferencia}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Request unlock option */}
+                {!mostrarFormSolicitud ? (
+                  <button
+                    onClick={() => setMostrarFormSolicitud(true)}
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Unlock className="h-4 w-4 text-amber-600" />
+                    Solicitar Desbloqueo de Cierre al Administrador
+                  </button>
+                ) : (
+                  <form onSubmit={handleSolicitarDesbloqueo} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                    <label className="block text-[10px] font-black uppercase text-slate-600 tracking-wider">
+                      Motivo del Desbloqueo *:
+                    </label>
+                    <textarea
+                      value={motivoDesbloqueoLocal}
+                      onChange={(e) => setMotivoDesbloqueoLocal(e.target.value)}
+                      placeholder="Ej: Se identificó una transacción adicional del día..."
+                      rows={2}
+                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#1A2D7C]"
+                      required
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMostrarFormSolicitud(false)}
+                        className="flex-1 py-2 bg-slate-200 text-slate-600 font-bold text-xs rounded-xl uppercase cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        className="flex-1 py-2 bg-[#1A2D7C] text-white font-bold text-xs rounded-xl uppercase shadow flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        Enviar Solicitud
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            ) : (
+              /* ACTIVE CLOSURE FORM */
+              <form onSubmit={handleGuardarCierre} className="space-y-6">
+                {/* Information Card */}
+                <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white p-5 rounded-2xl shadow-md border border-indigo-900/40 space-y-3">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                    <span className="text-[10px] font-mono text-indigo-300 font-bold uppercase tracking-widest">INFORMACIÓN DETECTADA</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30 uppercase">
+                      {numIdentificadosCierre} Identificados
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 pt-1">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-300 uppercase block">Total Identificado ({numIdentificadosCierre} txs):</span>
+                      <span className="text-xl font-black font-mono text-emerald-400 block mt-0.5">{formatCOP(totalIdentificadoCierre)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-300 uppercase block">Total en Aplicativo (Banco):</span>
+                      <span className="text-xl font-black font-mono text-amber-300 block mt-0.5">{formatCOP(totalAplicativoCierre)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Coincidence Check Radio / Buttons */}
+                <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <label className="block text-xs font-black uppercase text-slate-700 tracking-wider">
+                    ¿Coincide este valor con el cierre del aplicativo? *
+                  </label>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCoincideSeleccion(true)}
+                      className={`py-3 px-4 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        coincideSeleccion === true
+                          ? 'bg-emerald-600 text-white shadow-lg ring-2 ring-emerald-500 ring-offset-2'
+                          : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      SÍ, COINCIDE
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCoincideSeleccion(false)}
+                      className={`py-3 px-4 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        coincideSeleccion === false
+                          ? 'bg-rose-600 text-white shadow-lg ring-2 ring-rose-500 ring-offset-2'
+                          : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                      NO COINCIDE
+                    </button>
+                  </div>
+
+                  {coincideSeleccion === true && (
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs font-bold flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                      <span>El monto total identificado coincide perfectamente con el cierre del aplicativo.</span>
+                    </div>
+                  )}
+
+                  {coincideSeleccion === false && (
+                    <div className="space-y-3 pt-1 animate-in slide-in-from-top-2 duration-200">
+                      <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs font-bold flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+                        <span>Diferencia detectada: <strong className="font-mono underline">{formatCOP(Math.abs(diferenciaCierre))}</strong></span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black uppercase text-rose-800 tracking-wider mb-1">
+                          ¿Por qué no coincide? (Motivo / Observaciones del descuadre) *:
+                        </label>
+                        <textarea
+                          value={motivoDiferenciaInput}
+                          onChange={(e) => setMotivoDiferenciaInput(e.target.value)}
+                          placeholder="Ej: Falta comprobante de 1 cliente por $150.000 / Transferencia recibida fuera de horario de caja..."
+                          rows={3}
+                          className="w-full bg-white border border-rose-300 rounded-xl p-3 text-xs font-bold text-slate-800 placeholder:font-normal focus:outline-none focus:border-rose-600"
+                          required
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Submit Action Button */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCierreModal(false)}
+                    className="flex-1 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-2xl uppercase tracking-wider transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="flex-[2] py-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs rounded-2xl shadow-xl uppercase tracking-wider flex items-center justify-center gap-2 transition-all hover:scale-[1.01] cursor-pointer"
+                  >
+                    <Lock className="h-4 w-4" />
+                    Guardar y Bloquear Cierre
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

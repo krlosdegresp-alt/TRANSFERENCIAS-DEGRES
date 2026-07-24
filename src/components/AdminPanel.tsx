@@ -577,7 +577,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       'Confirmar Corrección',
       `¿Confirmas corregir el valor declarado del cierre para la Sede: ${sede} el ${fecha} a $${valor.toLocaleString('es-CO')}?`,
       () => {
-        registrarCierreCaja(fecha, sede, nombreCajera, valor);
+        registrarCierreCaja(fecha, sede, nombreCajera, 0, valor, valor, true, null, true);
         addAuditLog(currentUser.nombre, 'Corrección Directa de Cierre', `Sede: ${sede}, Fecha: ${fecha}, Nuevo valor: $${valor.toLocaleString('es-CO')}`);
         triggerAlert('Cierre Corregido', 'El valor del cierre de caja ha sido corregido con éxito.', 'success');
         setEditingCierreId(null);

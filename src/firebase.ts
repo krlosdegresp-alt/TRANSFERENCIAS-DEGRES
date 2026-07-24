@@ -991,19 +991,40 @@ export function saveCierresCaja(cierres: CierreCaja[]) {
   syncArrayToFirestore('cierres', cierres);
 }
 
-export function registrarCierreCaja(fecha: string, sede: Sede, nombreCajera: string, totalDeclarado: number): CierreCaja {
+export function registrarCierreCaja(
+  fecha: string, 
+  sede: Sede, 
+  nombreCajera: string, 
+  numeroIdentificados: number,
+  totalIdentificado: number,
+  totalAplicativo: number,
+  coincide: boolean,
+  motivoDiferencia?: string | null,
+  bloqueado: boolean = true
+): CierreCaja {
   const cierres = getCierresCaja();
   const id = `cierre_${sede}_${fecha}`;
   
   const existingIdx = cierres.findIndex(c => c.id === id);
   
+  const dif = totalIdentificado - totalAplicativo;
+
   const nuevoCierre: CierreCaja = {
     id,
     fecha,
     sede,
     nombreCajera,
-    totalDeclarado,
-    fechaCreacion: getColombiaDateTime().dateTimeStr
+    numeroIdentificados,
+    totalIdentificado,
+    totalAplicativo,
+    coincide,
+    motivoDiferencia: coincide ? null : (motivoDiferencia || null),
+    diferencia: dif,
+    totalDeclarado: totalIdentificado,
+    fechaCreacion: getColombiaDateTime().dateTimeStr,
+    bloqueado,
+    solicitaDesbloqueo: false,
+    motivoDesbloqueo: null
   };
   
   if (existingIdx >= 0) {
@@ -1021,11 +1042,36 @@ export function registrarCierreCaja(fecha: string, sede: Sede, nombreCajera: str
 
   addAuditLog(
     nombreCajera, 
-    'Cierre de Caja Guardado', 
-    `Sede: ${sede}, Fecha: ${fecha}, Declarado: $${totalDeclarado.toLocaleString('es-CO')}`
+    'Cierre de Caja Guardado y Bloqueado', 
+    `Sede: ${sede}, Fecha: ${fecha}, Identificados: ${numeroIdentificados} ($${totalIdentificado.toLocaleString('es-CO')}), Aplicativo: $${totalAplicativo.toLocaleString('es-CO')}, Coincide: ${coincide ? 'SÍ' : 'NO'}${!coincide ? ` - Motivo: ${motivoDiferencia}` : ''}`
   );
 
   return nuevoCierre;
+}
+
+export function importarCierresCajaBulk(nuevosCierres: CierreCaja[]): number {
+  if (!nuevosCierres || nuevosCierres.length === 0) return 0;
+  
+  const cierres = getCierresCaja();
+  let count = 0;
+
+  for (const c of nuevosCierres) {
+    const idx = cierres.findIndex(x => x.id === c.id);
+    if (idx >= 0) {
+      cierres[idx] = { ...cierres[idx], ...c };
+    } else {
+      cierres.push(c);
+    }
+    count++;
+
+    setDoc(doc(db, 'cierres', c.id), c).catch(e => {
+      console.error("Error bulk inserting closure to Firestore:", e);
+    });
+  }
+
+  localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+  notifyListeners();
+  return count;
 }
 
 export function solicitarDesbloqueoCierre(fecha: string, sede: Sede, motivo: string, usuario: string): boolean {

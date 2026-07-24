@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { Transaction, Sede } from '../types';
+import { Transaction, Sede, CierreCaja } from '../types';
 import { generarLlaveUnica } from './llave-unica';
 
 /**
@@ -507,4 +507,108 @@ export function parseExcelBankFile(
   }
 
   return list;
+}
+
+/**
+  * Parses Cash Closures (Cierres de Caja) from an exported report workbook or excel sheet
+  */
+export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
+  try {
+    const data = new Uint8Array(arrayBuffer);
+    const workbook = XLSX.read(data, { type: 'array' });
+    const targetSheetName = workbook.SheetNames.find(n => 
+      n.toLowerCase().includes('cierre') || 
+      n.toLowerCase().includes('cierres')
+    );
+
+    if (!targetSheetName) return [];
+
+    const worksheet = workbook.Sheets[targetSheetName];
+    const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+    if (rawRows.length < 2) return [];
+
+    let headerIdx = -1;
+    for (let r = 0; r < Math.min(5, rawRows.length); r++) {
+      const row = rawRows[r];
+      if (row && row.some(cell => {
+        const str = String(cell || '').toLowerCase();
+        return str.includes('sede') || str.includes('cierre') || str.includes('declarado');
+      })) {
+        headerIdx = r;
+        break;
+      }
+    }
+
+    if (headerIdx === -1) return [];
+
+    const header = rawRows[headerIdx];
+    const sedeCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('sede'));
+    const fechaCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('fecha'));
+    const cajeraCol = header.findIndex((c: any) => {
+      const str = String(c || '').toLowerCase();
+      return str.includes('cajera') || str.includes('nombre') || str.includes('usuario');
+    });
+    const numIdentCol = header.findIndex((c: any) => {
+      const str = String(c || '').toLowerCase();
+      return str.includes('identificado') || str.includes('n°') || str.includes('numero') || str.includes('transacciones');
+    });
+    const totalIdentCol = header.findIndex((c: any) => {
+      const str = String(c || '').toLowerCase();
+      return str.includes('total identificado') || str.includes('declarado') || str.includes('valor identificado');
+    });
+    const totalAplicativoCol = header.findIndex((c: any) => {
+      const str = String(c || '').toLowerCase();
+      return str.includes('aplicativo') || str.includes('banco') || str.includes('total banco');
+    });
+    const coincideCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('coincide'));
+    const motivoCol = header.findIndex((c: any) => {
+      const str = String(c || '').toLowerCase();
+      return str.includes('motivo') || str.includes('observaci') || str.includes('diferencia');
+    });
+
+    const cierres: CierreCaja[] = [];
+
+    for (let r = headerIdx + 1; r < rawRows.length; r++) {
+      const row = rawRows[r];
+      if (!row || row.length < 2) continue;
+
+      const rawSede = String(row[sedeCol] || '').trim();
+      const sede = detectarSede(rawSede) !== 'Desconocida' ? detectarSede(rawSede) : ((rawSede || 'Guayabal') as Sede);
+      
+      const fecha = parseExcelDate(row[fechaCol]);
+      if (!fecha) continue;
+
+      const nombreCajera = String(row[cajeraCol] || 'Cajera Importada').trim();
+      const numeroIdentificados = numIdentCol >= 0 ? parseInt(String(row[numIdentCol] || '0'), 10) : 0;
+      const totalIdentificado = totalIdentCol >= 0 ? parseColombianNumber(row[totalIdentCol]) || 0 : 0;
+      const totalAplicativo = totalAplicativoCol >= 0 ? parseColombianNumber(row[totalAplicativoCol]) || 0 : 0;
+
+      const coincideStr = coincideCol >= 0 ? String(row[coincideCol] || '').trim().toUpperCase() : 'SÍ';
+      const coincide = coincideStr === 'SÍ' || coincideStr === 'SI' || coincideStr === 'TRUE' || coincideStr === 'CONCILIADO';
+
+      const motivoDiferencia = motivoCol >= 0 ? String(row[motivoCol] || '').trim() : '';
+
+      const id = `cierre_${sede}_${fecha}`;
+      cierres.push({
+        id,
+        fecha,
+        sede,
+        nombreCajera,
+        numeroIdentificados,
+        totalIdentificado,
+        totalAplicativo,
+        coincide,
+        motivoDiferencia: coincide ? null : (motivoDiferencia || null),
+        diferencia: totalIdentificado - totalAplicativo,
+        totalDeclarado: totalIdentificado,
+        fechaCreacion: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        bloqueado: true
+      });
+    }
+
+    return cierres;
+  } catch (err) {
+    console.error('Error parsing cierres from excel workbook:', err);
+    return [];
+  }
 }

@@ -261,7 +261,17 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
     e.preventDefault();
     if (isAlreadyClosed) return;
 
-    registrarCierreCaja(cierreFecha, cierreSede, currentUser.nombre, totalIdentificadoCierre);
+    registrarCierreCaja(
+      cierreFecha, 
+      cierreSede, 
+      currentUser.nombre, 
+      numIdentificadosCierre, 
+      totalIdentificadoCierre, 
+      totalBancoCierre, 
+      totalIdentificadoCierre === totalBancoCierre, 
+      null, 
+      true
+    );
     alert(`¡Cierre de Caja Registrado y Bloqueado exitosamente!\nFecha: ${cierreFecha}\nSede: ${cierreSede}\nMonto Identificado: ${formatCOP(totalIdentificadoCierre)}`);
     if (onRefreshData) onRefreshData();
   };
@@ -445,6 +455,11 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
   const myTotalPendingCount = myFilteredActiveTxs.filter(t => !t.identificada).length;
 
   const advisorFilteredTxs = activeTxs.filter(tx => {
+    // Security lockdown: Asesores can NEVER see reports or transactions of other advisors
+    if (currentUser.role === 'Asesor' && tx.asesor !== currentUser.nombre) {
+      return false;
+    }
+
     // 1. Date filter matching (Exact day search or YYYY-MM-DD match)
     if (asesorDate && tx.fecha !== asesorDate) return false;
 
@@ -455,17 +470,18 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
     if (asesorStatusFilter === 'Conciliado' && !tx.identificada) return false;
     if (asesorStatusFilter === 'Pendiente' && tx.identificada) return false;
 
-    // 4. Advisor name filter matching
-    if (asesorNameFilter !== 'Todos' && tx.asesor !== asesorNameFilter) return false;
+    // 4. Advisor name filter matching (for non-Asesor roles)
+    if (currentUser.role !== 'Asesor' && asesorNameFilter !== 'Todos' && tx.asesor !== asesorNameFilter) return false;
 
-    // 5. Search query (by value or description or account or advisor name)
+    // 5. Search query (by value, description, account, comprobante or advisor name)
     if (asesorSearchQuery.trim()) {
       const q = asesorSearchQuery.toLowerCase();
       const matchValor = tx.valor.toString().includes(q);
       const matchDesc = tx.descripcion.toLowerCase().includes(q);
       const matchAsesor = (tx.asesor || '').toLowerCase().includes(q);
       const matchCuenta = tx.cuenta.toLowerCase().includes(q);
-      if (!matchValor && !matchDesc && !matchAsesor && !matchCuenta) return false;
+      const matchComp = (tx.comprobante || '').toLowerCase().includes(q);
+      if (!matchValor && !matchDesc && !matchAsesor && !matchCuenta && !matchComp) return false;
     }
 
     return true;
@@ -511,16 +527,22 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
         const totalBancoCierre = transactions.filter(
           t => t.fecha === c.fecha && t.sede === c.sede && !t.esHistorico
         ).reduce((sum, tx) => sum + tx.valor, 0);
-        const dif = c.totalDeclarado - totalBancoCierre;
+        const totalIdent = c.totalIdentificado !== undefined ? c.totalIdentificado : c.totalDeclarado;
+        const totalAplic = c.totalAplicativo !== undefined ? c.totalAplicativo : totalBancoCierre;
+        const dif = totalIdent - totalAplic;
+        const coincideStr = c.coincide !== undefined ? (c.coincide ? 'SÍ' : 'NO') : (dif === 0 ? 'SÍ' : 'NO');
 
         return {
           'Sede Física': c.sede,
           'Fecha Cierre': c.fecha,
-          'Nombre Cajera': c.nombreCajera,
-          'Monto Declarado (Caja Diaria Individual)': c.totalDeclarado,
-          'Total Banco Recibido (Aplicativo)': totalBancoCierre,
-          'Diferencia (Descuadre Caja)': dif,
-          'Estado del Cuadre': dif === 0 ? 'CONCILIADO' : (dif > 0 ? 'SOBRANTE' : 'FALTANTE'),
+          'Nombre Cajera / Usuario': c.nombreCajera,
+          'N° Transacciones Identificadas': c.numeroIdentificados !== undefined ? c.numeroIdentificados : 0,
+          'Valor Total Identificado (COP)': totalIdent,
+          'Valor Total Aplicativo (COP)': totalAplic,
+          'Diferencia / Descuadre (COP)': dif,
+          '¿Coincide con Aplicativo?': coincideStr,
+          'Motivo / Observación Descuadre': c.motivoDiferencia || (coincideStr === 'SÍ' ? 'Sin observaciones (Coincide)' : 'Sin justificación ingresada'),
+          'Estado Cierre': c.bloqueado ? 'GUARDADO Y BLOQUEADO' : 'REGISTRADO',
           'Fecha Registro Real': c.fechaCreacion.replace('T', ' ').slice(0, 19)
         };
       });
@@ -552,14 +574,17 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
       ];
 
       wsCierres['!cols'] = [
-        { wch: 15 }, // Sede
-        { wch: 15 }, // Fecha
-        { wch: 25 }, // Cajera
-        { wch: 30 }, // Monto Declarado
-        { wch: 25 }, // Total Banco
-        { wch: 22 }, // Diferencia
-        { wch: 18 }, // Estado cuadre
-        { wch: 20 }  // Fecha registro
+        { wch: 15 }, // Sede Física
+        { wch: 15 }, // Fecha Cierre
+        { wch: 25 }, // Nombre Cajera / Usuario
+        { wch: 28 }, // N° Transacciones Identificadas
+        { wch: 28 }, // Valor Total Identificado
+        { wch: 28 }, // Valor Total Aplicativo
+        { wch: 22 }, // Diferencia / Descuadre
+        { wch: 22 }, // ¿Coincide con Aplicativo?
+        { wch: 45 }, // Motivo / Observaciones
+        { wch: 22 }, // Estado Cierre
+        { wch: 22 }  // Fecha Registro Real
       ];
 
       const ranDate = getColombiaDateTime().dateStr;
@@ -672,17 +697,24 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
 
             <div>
               <label className="block text-[10px] font-bold text-slate-600 mb-1">Asesor Comercial</label>
-              <select
-                id="select-asesor-name"
-                value={asesorNameFilter}
-                onChange={(e) => setAsesorNameFilter(e.target.value)}
-                className="w-full text-xs font-bold border border-slate-200 rounded-xl p-2.5 bg-white focus:outline-none focus:border-[#1A2D7C]"
-              >
-                <option value="Todos">Todos los Asesores</option>
-                {advisorsList.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
+              {currentUser.role === 'Asesor' ? (
+                <div className="w-full text-xs border border-slate-200 rounded-xl p-2.5 bg-slate-100 text-[#1A2D7C] font-bold uppercase tracking-wider flex items-center justify-between">
+                  <span>{currentUser.nombre} (Tú)</span>
+                  <Lock className="h-3.5 w-3.5 text-slate-400" />
+                </div>
+              ) : (
+                <select
+                  id="select-asesor-name"
+                  value={asesorNameFilter}
+                  onChange={(e) => setAsesorNameFilter(e.target.value)}
+                  className="w-full text-xs font-bold border border-slate-200 rounded-xl p-2.5 bg-white focus:outline-none focus:border-[#1A2D7C]"
+                >
+                  <option value="Todos">Todos los Asesores</option>
+                  {advisorsList.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div>
@@ -750,11 +782,12 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
                   <tr className="border-b-2 border-slate-200 text-[10px] font-black uppercase text-slate-400 bg-slate-50/50">
                     <th className="p-4 font-space">Sede</th>
                     <th className="p-4 font-space">Fecha & Hora</th>
+                    <th className="p-4 font-space"># Comprobante / Ref</th>
                     <th className="p-4 font-space">Banco/Cuenta</th>
                     <th className="p-4 font-space">Monto / Saldo</th>
                     <th className="p-4 font-space">Asesor Responsable</th>
                     <th className="p-4 font-space text-center">Estado Aprobación</th>
-                    <th className="p-4 font-space">Descripción / Comprobante</th>
+                    <th className="p-4 font-space">Descripción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -780,6 +813,15 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
                         <td className="p-4 font-medium text-slate-700">
                           <div>{formatDateHuman(tx.fecha)}</div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">{tx.hora || 'No registrada'}</div>
+                        </td>
+                        <td className="p-4 font-mono">
+                          {tx.comprobante ? (
+                            <span className="inline-block bg-orange-100 text-[#D95D00] border border-orange-300 px-2.5 py-1 rounded-lg text-xs font-black tracking-wider shadow-xs">
+                              #{tx.comprobante}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 font-semibold italic">Sin # Comp</span>
+                          )}
                         </td>
                         <td className="p-4 font-mono font-bold text-slate-600">
                           {tx.cuenta}
