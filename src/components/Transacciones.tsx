@@ -56,6 +56,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const [montoMaxFilter, setMontoMaxFilter] = useState('');
   const [fechaFilter, setFechaFilter] = useState('');
   const [cuentaFilter, setCuentaFilter] = useState<string>('Todas');
+  const [comprobanteFilter, setComprobanteFilter] = useState('');
 
   // Editing state for validation inline submission
   const [activeEditingId, setActiveEditingId] = useState<string | null>(null);
@@ -126,7 +127,12 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
       tx.llaveUnica.toLowerCase().includes(searchTerm.toLowerCase()) ||
       tx.descripcion.toLowerCase().includes(searchTerm.toLowerCase()) ||
       tx.valor.toString().includes(searchTerm) ||
-      tx.cuenta.includes(searchTerm);
+      tx.cuenta.includes(searchTerm) ||
+      (tx.comprobante || '').toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesComprobante = !comprobanteFilter.trim() ||
+      (tx.comprobante || '').toLowerCase().includes(comprobanteFilter.trim().toLowerCase()) ||
+      (tx.oficina || '').toLowerCase().includes(comprobanteFilter.trim().toLowerCase());
 
     const matchesStatus = 
       statusFilter === 'all' ||
@@ -160,7 +166,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
       tx.sede === sedeFilter ||
       (cuentaFilter !== 'Todas' && matchesCuenta);
 
-    return matchesSearch && matchesStatus && matchesSede && matchesMin && matchesMax && matchesFecha && matchesCuenta;
+    return matchesSearch && matchesComprobante && matchesStatus && matchesSede && matchesMin && matchesMax && matchesFecha && matchesCuenta;
   });
 
   const handleStartIdentification = (tx: Transaction) => {
@@ -517,6 +523,19 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
             />
           </div>
 
+          {/* Comprobante / Ref Filter Input */}
+          <div className="relative">
+            <span className="absolute left-2.5 top-2.5 text-[9px] font-black text-slate-400"># COMP</span>
+            <input
+              id="filter-comprobante"
+              type="text"
+              placeholder="N° Comprobante..."
+              value={comprobanteFilter}
+              onChange={(e) => setComprobanteFilter(e.target.value)}
+              className="text-xs font-bold pl-14 pr-2 py-2 border border-slate-200 rounded-xl w-36 focus:ring-2 focus:ring-[#1A2D7C]/20 focus:border-[#1A2D7C] bg-white text-slate-700 outline-none"
+            />
+          </div>
+
           {/* Monto Mínimo Filter */}
           <div className="relative">
             <span className="absolute left-2.5 top-2.5 text-[9px] font-black text-slate-400">Min $</span>
@@ -569,11 +588,12 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
           </div>
 
           {/* Clear Filters Button */}
-          {(searchTerm || sedeFilter !== (currentUser.role === 'Cajera' && currentUser.sede ? currentUser.sede : 'Todas') || statusFilter !== 'pendientes' || montoMinFilter || montoMaxFilter || fechaFilter || cuentaFilter !== 'Todas') && (
+          {(searchTerm || comprobanteFilter || sedeFilter !== (currentUser.role === 'Cajera' && currentUser.sede ? currentUser.sede : 'Todas') || statusFilter !== 'pendientes' || montoMinFilter || montoMaxFilter || fechaFilter || cuentaFilter !== 'Todas') && (
             <button
               id="btn-clear-filters"
               onClick={() => {
                 setSearchTerm('');
+                setComprobanteFilter('');
                 setSedeFilter(currentUser.role === 'Cajera' && currentUser.sede ? currentUser.sede : 'Todas');
                 setStatusFilter('pendientes');
                 setMontoMinFilter('');
