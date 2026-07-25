@@ -3,6 +3,7 @@ import {
   getChatMessages, 
   sendChatMessage, 
   deleteChatMessage,
+  clearChatMessages,
   subscribeToDatabase, 
   getUsers,
   getCierresCaja,
@@ -228,7 +229,21 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef<boolean>(true);
+  const prevVisibleLengthRef = useRef<number>(0);
+  const prevThreadRef = useRef<string>(selectedThread);
+  const prevIsOpenRef = useRef<boolean>(isOpen);
   const prevMessagesLength = useRef(messages.length);
+
+  // Scroll position monitor to detect if user manually scrolled up
+  const handleScroll = () => {
+    if (!chatContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+    // User is near bottom if distance to bottom is less than 80px
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 80;
+    isAtBottomRef.current = isNearBottom;
+  };
 
   // Synchronize database updates
   useEffect(() => {
@@ -385,12 +400,41 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
 
   const visibleMessages = getVisibleMessages();
 
-  // Scroll to bottom of message panel
+  // Smart scroll to bottom of message panel only when appropriate (opening, thread switch, or new message while at bottom)
   useEffect(() => {
-    if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!isOpen) {
+      prevIsOpenRef.current = false;
+      return;
     }
-  }, [visibleMessages, isOpen]);
+
+    const justOpened = !prevIsOpenRef.current && isOpen;
+    const threadChanged = prevThreadRef.current !== selectedThread;
+
+    prevIsOpenRef.current = isOpen;
+    prevThreadRef.current = selectedThread;
+
+    // Case 1: Just opened or switched thread -> scroll to bottom automatically
+    if (justOpened || threadChanged) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      isAtBottomRef.current = true;
+      prevVisibleLengthRef.current = visibleMessages.length;
+      return;
+    }
+
+    // Case 2: New message added to current thread
+    if (visibleMessages.length > prevVisibleLengthRef.current) {
+      const lastMsg = visibleMessages[visibleMessages.length - 1];
+      const isSentByMe = lastMsg?.senderId === currentUser.id;
+
+      // Scroll down if user sent the message OR if user was already near bottom
+      if (isSentByMe || isAtBottomRef.current) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        isAtBottomRef.current = true;
+      }
+    }
+
+    prevVisibleLengthRef.current = visibleMessages.length;
+  }, [visibleMessages, isOpen, selectedThread, currentUser.id]);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -425,8 +469,16 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
 
   const handleDeleteMessage = (msgId: string) => {
     if (currentUser.role !== 'Admin' && currentUser.role !== 'Tesorera') return;
-    if (confirm('¿Estás seguro de que deseas eliminar este mensaje del Soporte General?')) {
+    if (confirm('¿Estás seguro de que deseas eliminar este mensaje?')) {
       deleteChatMessage(msgId);
+    }
+  };
+
+  const handleClearThread = (threadId: string) => {
+    if (currentUser.role !== 'Admin' && currentUser.role !== 'Tesorera') return;
+    const channelName = threadId === 'general' ? 'Soporte General (Anuncios)' : 'este canal de soporte directo';
+    if (confirm(`¿Estás seguro de que deseas BORRAR TODOS los mensajes de ${channelName}? Esta acción eliminará el historial del chat por completo.`)) {
+      clearChatMessages(threadId);
     }
   };
 
@@ -584,6 +636,18 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                 </button>
               </div>
             )}
+
+            {/* Admin Delete Entire Thread Chat Button */}
+            {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
+              <button
+                type="button"
+                onClick={() => handleClearThread(selectedThread)}
+                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition-all cursor-pointer shadow-xs flex items-center justify-center shrink-0"
+                title={`Borrar historial del chat ${selectedThread === 'general' ? 'General' : 'directo'}`}
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
           {/* Write permission warning notice or helpful tips */}
@@ -602,7 +666,11 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
           )}
 
           {/* Messages list */}
-          <div className="flex-1 p-4 overflow-y-auto bg-slate-50 space-y-3.5">
+          <div 
+            ref={chatContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 p-4 overflow-y-auto bg-slate-50 space-y-3.5"
+          >
             {visibleMessages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2">
                 <p className="text-xs text-slate-400 font-semibold italic">No hay mensajes registrados en este canal.</p>
@@ -852,8 +920,8 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                           </div>
                         )}
 
-                        {/* Admin delete message button - only in general announcements and for Admin roles */}
-                        {isGeneralChannel && (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
+                        {/* Admin delete message button - available for Admin and Tesorera roles in any channel */}
+                        {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
                           <button
                             onClick={() => handleDeleteMessage(msg.id)}
                             className="p-1 bg-red-50 text-red-600 hover:bg-red-100 rounded transition-all cursor-pointer shadow-sm shrink-0 opacity-100 md:opacity-0 md:group-hover/msg:opacity-100"

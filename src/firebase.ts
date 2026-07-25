@@ -1250,6 +1250,51 @@ export function deleteChatMessage(id: string): boolean {
   return false;
 }
 
+export function clearChatMessages(threadId?: string): boolean {
+  const messages = getChatMessages();
+  let toKeep: ChatMessage[] = [];
+  let toDelete: ChatMessage[] = [];
+
+  if (!threadId || threadId === 'all') {
+    toDelete = [...messages];
+    toKeep = [];
+  } else if (threadId === 'general') {
+    toDelete = messages.filter(msg => msg.receiverId === 'general' || !msg.receiverId);
+    toKeep = messages.filter(msg => msg.receiverId && msg.receiverId !== 'general');
+  } else {
+    // Thread with specific user ID
+    toDelete = messages.filter(msg =>
+      msg.receiverId === threadId || msg.senderId === threadId
+    );
+    toKeep = messages.filter(msg =>
+      !(msg.receiverId === threadId || msg.senderId === threadId)
+    );
+  }
+
+  localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(toKeep));
+  notifyListeners();
+
+  (async () => {
+    try {
+      const chunks = [];
+      for (let i = 0; i < toDelete.length; i += 500) {
+        chunks.push(toDelete.slice(i, i + 500));
+      }
+      for (const chunk of chunks) {
+        const bWrite = writeBatch(db);
+        chunk.forEach(msg => {
+          bWrite.delete(doc(db, 'chat', msg.id));
+        });
+        await bWrite.commit();
+      }
+    } catch (e) {
+      console.error("Error clearing chat messages in Firestore:", e);
+    }
+  })();
+
+  return true;
+}
+
 // ----------------------------------------------------
 // VIDEO CALLS OPERATIONS
 // ----------------------------------------------------
