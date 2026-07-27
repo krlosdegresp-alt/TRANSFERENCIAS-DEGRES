@@ -273,6 +273,30 @@ function getExportMockupHtml(type: string): string {
         </div>
       `;
       break;
+    case 'sucursal_virtual':
+      innerHtml = `
+        <div style="padding: 12px; background-color: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; margin: 10px 0; font-family: Arial, sans-serif;">
+          <div style="background-color: #fef08a; border: 1px solid #facc15; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 8.5pt; color: #854d0e; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <span>🔒 PORTAL OFICIAL: BANCOLOMBIA NEGOCIOS</span>
+            <span style="font-family: monospace; font-[#1A2D7C];">https://www.bancolombia.com/negocios</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 8.5pt; font-family: Arial, sans-serif;">
+            <tr style="background-color: #ffffff; border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 6px; font-weight: bold; color: #1A2D7C; width: 140px;">Cuentas Corporativas:</td>
+              <td style="padding: 6px; font-weight: bold; color: #334155;">Guayabal (***6519) | Sabaneta (***0916) | Naranjal (***6807)</td>
+            </tr>
+            <tr style="background-color: #f1f5f9; border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 6px; font-weight: bold; color: #1A2D7C;">Ubicación Opción:</td>
+              <td style="padding: 6px; color: #334155;">Parte superior derecha &rarr; <strong>Movimientos</strong> &rarr; Historial</td>
+            </tr>
+            <tr style="background-color: #ffffff;">
+              <td style="padding: 6px; font-weight: bold; color: #1A2D7C;">Tipo de Archivo:</td>
+              <td style="padding: 6px; font-weight: bold; color: #15803d;">Movimiento Diario (.ZIP) &rarr; [ Botón Descargar ]</td>
+            </tr>
+          </table>
+        </div>
+      `;
+      break;
     case 'rendimiento_asesores':
       innerHtml = `
         <div style="padding: 12px; background-color: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 8px; margin: 10px 0; font-family: Arial, sans-serif;">
@@ -564,6 +588,34 @@ function MockupImage({ type }: { type: string }) {
               <div className="flex justify-between items-center p-2 rounded-lg border border-slate-50">
                 <span className="font-bold">2. Pedro Gómez</span>
                 <strong className="text-slate-700 font-mono font-black">$5,200,000</strong>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {type === 'sucursal_virtual' && (
+          <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3 max-w-md mx-auto text-xs">
+            <div className="bg-amber-100 border border-amber-300 p-2.5 rounded-lg flex items-center justify-between text-[10.5px] font-bold text-amber-950">
+              <span className="flex items-center gap-1.5 font-black">
+                <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                Portal Bancolombia Negocios
+              </span>
+              <a href="https://www.bancolombia.com/negocios" target="_blank" rel="noreferrer" className="text-indigo-900 underline font-mono text-[9.5px]">
+                bancolombia.com/negocios
+              </a>
+            </div>
+            <div className="space-y-1.5 text-[10px] text-slate-650 font-medium">
+              <div className="flex justify-between p-1.5 bg-slate-50 rounded border border-slate-100">
+                <span className="font-bold text-slate-700">1. Cuentas de Recaudo:</span>
+                <span className="font-mono text-[#1A2D7C] font-black">Guayabal / Sabaneta / Naranjal</span>
+              </div>
+              <div className="flex justify-between p-1.5 bg-slate-50 rounded border border-slate-100">
+                <span className="font-bold text-slate-700">2. Opción Movimientos:</span>
+                <span className="font-semibold text-slate-800">Sup. Derecha &rarr; Historial</span>
+              </div>
+              <div className="flex justify-between p-1.5 bg-emerald-50 rounded border border-emerald-200">
+                <span className="font-bold text-emerald-900">3. Tipo de Archivo:</span>
+                <span className="font-black text-emerald-700">Movimiento Diario (.ZIP)</span>
               </div>
             </div>
           </div>
@@ -1075,10 +1127,36 @@ export default function Manuales({ currentUser }: ManualesProps) {
 
     <h2 style="color: #1A2D7C; font-size: 13pt; margin-top: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">3. PROCEDIMIENTO OPERATIVO PASO A PASO: "CARGAR BANCO"</h2>
 
-    <h3 style="color: #F47920; font-size: 11pt; margin-top: 16px;">Paso 3.1: Descarga del Archivo de Movimientos de Bancolombia</h3>
+    <h3 style="color: #F47920; font-size: 11pt; margin-top: 16px;">Paso 3.1: Descarga de Archivos e Historial de Movimientos en Bancolombia Negocios</h3>
     <p style="text-align: justify;">
-      Ingrese a la plataforma de la sucursal virtual empresas de Bancolombia (o la entidad correspondiente). Descargue los movimientos del día anterior o de la jornada en curso. Exporte este archivo en formato de hoja de cálculo compatible (<strong>Excel .xlsx o .xls</strong>, o formato plano <strong>.csv</strong>). Guarde el archivo en una carpeta segura de su equipo de cómputo.
+      Para garantizar la seguridad de la información financiera de DEGRES S.A.S. y evitar accesos a sitios web fraudulentos o de phishing, la Tesorera debe ingresar exclusivamente a través del portal oficial verificado de Bancolombia Negocios.
     </p>
+    
+    <div style="background-color: #fefce8; border: 1.5px solid #fef08a; padding: 12px; border-radius: 8px; margin: 10px 0; font-family: Arial, sans-serif;">
+      <p style="margin: 0; color: #854d0e; font-weight: bold; font-size: 9.5pt;">
+        🔒 URL OFICIAL Y VERIFICADA (BANCOLOMBIA NEGOCIOS):
+      </p>
+      <p style="margin: 4px 0 0 0; font-family: monospace; font-size: 10.5pt; color: #1A2D7C; font-weight: bold;">
+        <a href="https://www.bancolombia.com/negocios" target="_blank" style="color: #1A2D7C; text-decoration: underline;">https://www.bancolombia.com/negocios</a>
+      </p>
+      <p style="margin: 4px 0 0 0; font-size: 8.5pt; color: #a16207;">
+        * Verifique siempre la presencia del candado de seguridad (HTTPS) en la barra de direcciones de su navegador antes de digitar las credenciales corporativas.
+      </p>
+    </div>
+
+    <p style="text-align: justify; font-weight: bold; color: #1A2D7C; margin-top: 12px; margin-bottom: 6px;">
+      Instrucciones Paso a Paso para la Descarga de Movimientos en Portal Bancolombia Negocios:
+    </p>
+    <ol style="margin-bottom: 16px; line-height: 1.6; text-align: justify;">
+      <li><strong>Ingreso al Portal Oficial:</strong> Abra su navegador de internet e ingrese directamente a la dirección web oficial: <a href="https://www.bancolombia.com/negocios" target="_blank" style="color: #1A2D7C; font-weight: bold;">https://www.bancolombia.com/negocios</a>.</li>
+      <li><strong>Autenticación e Inicio de Sesión:</strong> Diligencie la información de inicio de sesión (Usuario corporativo, clave de acceso y token o clave dinámica).</li>
+      <li><strong>Selección de la Cuenta Corporativa:</strong> En el panel de inicio, desplace la pantalla hacia abajo hasta ubicar la sección de productos y cuentas. Visualizará las 3 cuentas de recaudo asociadas a las sedes físicas de DEGRES S.A.S. (Guayabal, Naranjal y Sabaneta). Haga clic para seleccionar <strong>1 de las 3 cuentas</strong>.</li>
+      <li><strong>Acceso al Módulo de Movimientos:</strong> En el panel de la cuenta seleccionada, diríjase a la opción <strong>"Movimientos"</strong>, ubicada en la parte superior derecha de la pantalla.</li>
+      <li><strong>Configuración del Tipo de Descarga:</strong> En la casilla de tipo de descarga o consulta, seleccione la opción <strong>"Historial"</strong>.</li>
+      <li><strong>Rango de Fechas:</strong> Elija las fechas correspondientes a los abonos e ingresos que desea importar y conciliar.</li>
+      <li><strong>Tipo de Archivo:</strong> En el selector de tipo de archivo, elija la opción <strong>"Movimiento Diario"</strong>.</li>
+      <li><strong>Descarga del Archivo:</strong> Pulse el botón <strong>"Descargar"</strong>. El sistema descargará el archivo comprimido (.ZIP o Excel) en la carpeta de descargas de su equipo de cómputo, listo para su procesamiento.</li>
+    </ol>
     ${getExportMockupHtml('sucursal_virtual')}
 
     <h3 style="color: #F47920; font-size: 11pt; margin-top: 16px;">Paso 3.2: Acceso a la Interfaz y Carga del Archivo</h3>
@@ -2068,12 +2146,69 @@ export default function Manuales({ currentUser }: ManualesProps) {
                     3. Procedimiento Operativo Paso a Paso: "Cargar Banco"
                   </h5>
  
-                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-2">
-                    <p className="font-bold text-[#1A2D7C]">Paso 3.1 y 3.2: Descarga del Extracto Bancario y Zona de Carga</p>
-                    <p>
-                      Descargue el extracto en formato compatible Excel desde su portal empresarial. Diríjase a la pestaña <strong>"Cargar Banco"</strong> en la plataforma. Arrastre el archivo dentro de la nube interactiva de carga de archivos o haga clic para cargarlo localmente.
+                  <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-3 shadow-xs">
+                    <div className="flex items-center justify-between border-b border-slate-150 pb-2">
+                      <p className="font-extrabold text-[#1A2D7C] text-xs uppercase font-space">
+                        Paso 3.1: Descarga de Archivos ZIP en Portal Bancolombia (Negocios)
+                      </p>
+                      <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-0.5 rounded-md uppercase">
+                        Portal Oficial Verificado
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-650 leading-relaxed">
+                      Para garantizar la seguridad de las transacciones e información corporativa, la Tesorera debe ingresar únicamente al portal oficial verificado de Bancolombia Negocios.
                     </p>
-                    <MockupImage type="cargar_banco" />
+
+                    <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-1.5">
+                      <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                        <ExternalLink className="h-4 w-4 text-[#F47920]" />
+                        <span>Enlace Seguro Directo (Bancolombia Negocios):</span>
+                      </div>
+                      <a
+                        href="https://www.bancolombia.com/negocios"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-mono font-black text-indigo-900 bg-white px-2.5 py-1 rounded-lg border border-amber-300 hover:text-orange-600 transition-colors shadow-2xs"
+                      >
+                        https://www.bancolombia.com/negocios
+                        <ExternalLink className="h-3.5 w-3.5 text-[#F47920]" />
+                      </a>
+                    </div>
+
+                    <div className="space-y-2 pt-1">
+                      <p className="font-bold text-xs text-slate-800">
+                        Secuencia Detallada de Descarga (8 Pasos Operativos):
+                      </p>
+                      <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-slate-650 font-medium pl-1 leading-relaxed">
+                        <li>
+                          <strong>Ingreso al Portal:</strong> Ingrese al portal oficial <a href="https://www.bancolombia.com/negocios" target="_blank" rel="noreferrer" className="text-indigo-800 font-bold underline">Bancolombia (Negocios)</a>.
+                        </li>
+                        <li>
+                          <strong>Inicio de Sesión:</strong> Diligencie la información de inicio de sesión (Usuario, Clave y Token/Clave Dinámica).
+                        </li>
+                        <li>
+                          <strong>Selección de Cuenta:</strong> Desplace la pantalla hacia abajo, visualice las 3 cuentas (Guayabal, Naranjal, Sabaneta) y seleccione 1 de ellas.
+                        </li>
+                        <li>
+                          <strong>Ir a Movimientos:</strong> En la esquina superior derecha del panel de la cuenta, haga clic en <strong>"Movimientos"</strong>.
+                        </li>
+                        <li>
+                          <strong>Tipo de Descarga:</strong> En tipo de descarga, seleccione <strong>"Historial"</strong>.
+                        </li>
+                        <li>
+                          <strong>Rango de Fechas:</strong> Elija las fechas que desea agregar.
+                        </li>
+                        <li>
+                          <strong>Tipo de Archivo:</strong> En tipo de archivo, elija <strong>"Movimiento Diario"</strong>.
+                        </li>
+                        <li>
+                          <strong>Descargar:</strong> Pulse el botón <strong>"Descargar"</strong> para obtener el archivo ZIP con la información.
+                        </li>
+                      </ol>
+                    </div>
+
+                    <MockupImage type="sucursal_virtual" />
                   </div>
  
                   <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-2 mt-3">

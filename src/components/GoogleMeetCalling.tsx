@@ -322,66 +322,48 @@ export default function GoogleMeetCalling({ currentUser }: GoogleMeetCallingProp
   // Predefined users available to be called based on role permissions:
   // - Asesor can call Tesorera or Admin.
   // - Tesorera and Admin can call anyone (except themselves).
-  // - Cajera cannot start calls.
-  const allowedTargets = users.filter(u => {
-    if (u.id === currentUser.id || u.isBlocked) return false;
-    
-    if (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') {
-      return true;
-    } else if (currentUser.role === 'Asesor') {
-      return u.role === 'Admin' || u.role === 'Tesorera';
-    }
-    return false;
-  });
+  // - Cajera can call Tesorera or Admin as well.
+  const allowedTargets = (() => {
+    const userMap = new Map<string, User>();
+    PREDEFINED_USERS.forEach(u => userMap.set(u.id, u));
+    users.forEach(u => userMap.set(u.id, u));
+    const combinedUsers = Array.from(userMap.values());
+
+    return combinedUsers.filter(u => {
+      if (u.id === currentUser.id || u.isBlocked) return false;
+      
+      if (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') {
+        return true;
+      } else if (currentUser.role === 'Asesor' || currentUser.role === 'Cajera') {
+        return u.role === 'Admin' || u.role === 'Tesorera';
+      }
+      return false;
+    });
+  })();
+
+  // Listen for open-call-dialer custom event from floating action cluster
+  useEffect(() => {
+    const handleOpenDialer = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const callTypeRequested = customEvent.detail?.type || 'video';
+      if (allowedTargets.length === 0) {
+        alert("No hay destinatarios válidos o disponibles para llamar en este momento.");
+        return;
+      }
+      setDialingReceiverId(allowedTargets[0]?.id || '');
+      setCustomMeetLink('');
+      setMeetLinkError('');
+      setCallType(callTypeRequested);
+      setLinkMethod('auto');
+      setShowDialer(true);
+    };
+
+    window.addEventListener('open-call-dialer', handleOpenDialer);
+    return () => window.removeEventListener('open-call-dialer', handleOpenDialer);
+  }, [allowedTargets]);
 
   return (
     <>
-      {/* Floating Voice Call Launcher Button */}
-      {!incomingCall && !outgoingCall && !acceptedCall && currentUser.role !== 'Cajera' && (
-        <button
-          id="btn-voice-launcher"
-          onClick={() => {
-            if (allowedTargets.length === 0) {
-              alert("No hay destinatarios válidos o disponibles para llamar en este momento.");
-              return;
-            }
-            setDialingReceiverId(allowedTargets[0]?.id || '');
-            setCustomMeetLink('');
-            setMeetLinkError('');
-            setCallType('voice');
-            setLinkMethod('auto');
-            setShowDialer(true);
-          }}
-          className="fixed bottom-6 right-46 z-40 p-4 bg-gradient-to-tr from-sky-600 to-blue-700 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer flex items-center justify-center border-2 border-white/20"
-          title="Iniciar Llamada de Voz"
-        >
-          <Phone className="h-6 w-6 text-white" />
-        </button>
-      )}
-
-      {/* Floating Video Call Launcher Button */}
-      {!incomingCall && !outgoingCall && !acceptedCall && currentUser.role !== 'Cajera' && (
-        <button
-          id="btn-google-meet-launcher"
-          onClick={() => {
-            if (allowedTargets.length === 0) {
-              alert("No hay destinatarios válidos o disponibles para llamar en este momento.");
-              return;
-            }
-            setDialingReceiverId(allowedTargets[0]?.id || '');
-            setCustomMeetLink('');
-            setMeetLinkError('');
-            setCallType('video');
-            setLinkMethod('auto');
-            setShowDialer(true);
-          }}
-          className="fixed bottom-6 right-28 z-40 p-4 bg-gradient-to-tr from-emerald-600 to-teal-700 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer flex items-center justify-center border-2 border-white/20"
-          title="Iniciar Videollamada Google Meet"
-        >
-          <Video className="h-6 w-6 text-white" />
-        </button>
-      )}
-
       {/* Dialer Modal */}
       {showDialer && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-300">

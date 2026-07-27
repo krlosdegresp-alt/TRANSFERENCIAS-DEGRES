@@ -6,6 +6,7 @@ import {
   clearChatMessages,
   subscribeToDatabase, 
   getUsers,
+  PREDEFINED_USERS,
   getCierresCaja,
   startVideoCall,
   getTransactions,
@@ -76,6 +77,7 @@ function playNotificationChime() {
 
 export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => getChatMessages());
   const [text, setText] = useState('');
   
@@ -262,12 +264,17 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   // - Cajeras and Advisors (Asesores) can talk ONLY to Admins and Treasurers.
   // - Advisors cannot speak with other advisors, and cashiers cannot speak with other cashiers.
   const getAllowedRecipients = (): User[] => {
-    const activeUsers = allUsers.filter(u => !u.isBlocked && u.id !== currentUser.id);
+    const userMap = new Map<string, User>();
+    PREDEFINED_USERS.forEach(u => userMap.set(u.id, u));
+    allUsers.forEach(u => userMap.set(u.id, u));
+    const combinedUsers = Array.from(userMap.values());
+
+    const activeUsers = combinedUsers.filter(u => !u.isBlocked && u.id !== currentUser.id);
     
     if (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') {
       return activeUsers;
     } else {
-      // Cajeras and Asesores can only chat with Admins and Treasurers
+      // Cajeras and Asesores can only chat/call Admins and Treasurers
       return activeUsers.filter(u => u.role === 'Admin' || u.role === 'Tesorera');
     }
   };
@@ -497,19 +504,87 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   }, []);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 font-sans">
+    <div 
+      className="fixed bottom-6 right-6 z-50 font-sans flex flex-col items-end"
+      onMouseEnter={() => {
+        if (!isOpen) setIsHovered(true);
+      }}
+      onMouseLeave={() => setIsHovered(false)}
+    >
       
-      {/* Floating Action Button */}
+      {/* Deployable Call Action Buttons (Voice & Video) on Hover when Chat is closed */}
+      {isHovered && !isOpen && allowedRecipients.length > 0 && (
+        <div className="flex flex-col items-end gap-3 mb-3 animate-in fade-in slide-in-from-bottom-5 duration-300 ease-out">
+          
+          {/* Voice Call Floating Button */}
+          <div className="flex items-center gap-2.5 group/voice">
+            <span className="bg-slate-900/95 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl shadow-xl backdrop-blur-md border border-white/15 whitespace-nowrap opacity-90 group-hover/voice:opacity-100 group-hover/voice:-translate-x-1 transition-all duration-200">
+              📞 Llamada de voz
+            </span>
+            <button
+              id="btn-hover-voice-call"
+              type="button"
+              onClick={() => {
+                setIsHovered(false);
+                window.dispatchEvent(new CustomEvent('open-call-dialer', { detail: { type: 'voice' } }));
+              }}
+              className="p-3.5 bg-gradient-to-tr from-sky-500 via-sky-600 to-blue-700 text-white rounded-full shadow-xl shadow-sky-600/30 hover:shadow-2xl hover:shadow-sky-500/50 hover:scale-115 active:scale-95 transition-all duration-200 cursor-pointer flex items-center justify-center border-2 border-white/30"
+              title="Iniciar Llamada de Voz"
+            >
+              <Phone className="h-5 w-5 text-white" />
+            </button>
+          </div>
+
+          {/* Video Call Floating Button */}
+          <div className="flex items-center gap-2.5 group/video">
+            <span className="bg-slate-900/95 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl shadow-xl backdrop-blur-md border border-white/15 whitespace-nowrap opacity-90 group-hover/video:opacity-100 group-hover/video:-translate-x-1 transition-all duration-200">
+              📹 Videollamada Google Meet
+            </span>
+            <button
+              id="btn-hover-video-call"
+              type="button"
+              onClick={() => {
+                setIsHovered(false);
+                window.dispatchEvent(new CustomEvent('open-call-dialer', { detail: { type: 'video' } }));
+              }}
+              className="p-3.5 bg-gradient-to-tr from-emerald-500 via-emerald-600 to-teal-700 text-white rounded-full shadow-xl shadow-emerald-600/30 hover:shadow-2xl hover:shadow-emerald-500/50 hover:scale-115 active:scale-95 transition-all duration-200 cursor-pointer flex items-center justify-center border-2 border-white/30"
+              title="Iniciar Videollamada Google Meet"
+            >
+              <Video className="h-5 w-5 text-white" />
+            </button>
+          </div>
+
+        </div>
+      )}
+
+      {/* Main Chat Floating Trigger Button */}
       <button
         id="chat-floating-trigger"
-        onClick={() => setIsOpen(!isOpen)}
-        className="relative group p-4 bg-gradient-to-tr from-[#1A2D7C] to-indigo-900 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-300 cursor-pointer flex items-center justify-center border-2 border-white/20"
+        onClick={() => {
+          setIsOpen(!isOpen);
+          setIsHovered(false);
+        }}
+        className={`relative group/main p-4 text-white rounded-full shadow-2xl transition-all duration-300 cursor-pointer flex items-center justify-center border-2 border-white/30 ${
+          isOpen 
+            ? 'bg-slate-800 hover:bg-slate-900 rotate-90 scale-95 shadow-slate-900/40' 
+            : 'bg-gradient-to-tr from-[#1A2D7C] via-indigo-900 to-blue-900 hover:scale-110 active:scale-95 shadow-indigo-900/40 hover:shadow-2xl hover:shadow-indigo-900/60'
+        }`}
+        title={isOpen ? "Cerrar Chat" : "Soporte y Llamadas"}
       >
-        <MessageSquare className="h-6 w-6 text-white" />
+        {/* Soft glowing outer ring on hover */}
+        {isHovered && !isOpen && (
+          <span className="absolute -inset-1.5 rounded-full bg-indigo-500/25 animate-ping pointer-events-none" />
+        )}
+
+        {isOpen ? (
+          <X className="h-6 w-6 text-white transition-transform duration-300" />
+        ) : (
+          <MessageSquare className="h-6 w-6 text-white group-hover/main:scale-110 group-hover/main:-rotate-6 transition-transform duration-300" />
+        )}
         
         {/* Unread & Notification Counter Badge */}
         {(unreadCount > 0 || (currentUser.role !== 'Cajera' && pendingRequestsCount > 0)) && (
-          <span className="absolute -top-1.5 -right-1.5 bg-[#F47920] text-white text-[10px] font-black h-5.5 w-5.5 rounded-full flex items-center justify-center animate-bounce shadow-md">
+          <span className="absolute -top-1.5 -right-1.5 bg-[#F47920] text-white text-[10px] font-black h-6 w-6 rounded-full flex items-center justify-center animate-bounce shadow-lg border-2 border-white">
             {unreadCount > 0 ? unreadCount : '🔔'}
           </span>
         )}
@@ -582,12 +657,14 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                 </option>
               ))}
             </select>
-            {selectedThread !== 'general' && currentUser.role !== 'Cajera' && (
+            {allowedRecipients.length > 0 && (
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
                   onClick={async () => {
-                    const targetUser = allowedRecipients.find(r => r.id === selectedThread);
+                    const targetUser = selectedThread !== 'general' 
+                      ? allowedRecipients.find(r => r.id === selectedThread) 
+                      : allowedRecipients[0];
                     if (targetUser) {
                       try {
                         await startVideoCall(
@@ -605,14 +682,16 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                     }
                   }}
                   className="p-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center"
-                  title="Llamada de voz"
+                  title={selectedThread !== 'general' ? "Llamada de voz" : `Llamar a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
                 >
                   <Phone className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={async () => {
-                    const targetUser = allowedRecipients.find(r => r.id === selectedThread);
+                    const targetUser = selectedThread !== 'general' 
+                      ? allowedRecipients.find(r => r.id === selectedThread) 
+                      : allowedRecipients[0];
                     if (targetUser) {
                       try {
                         await startVideoCall(
@@ -630,7 +709,7 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                     }
                   }}
                   className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center"
-                  title="Videollamada Google Meet"
+                  title={selectedThread !== 'general' ? "Videollamada Google Meet" : `Videollamada a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
                 >
                   <Video className="h-4 w-4" />
                 </button>
@@ -642,10 +721,10 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
               <button
                 type="button"
                 onClick={() => handleClearThread(selectedThread)}
-                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition-all cursor-pointer shadow-xs flex items-center justify-center shrink-0"
+                className="p-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0 border border-red-500/30"
                 title={`Borrar historial del chat ${selectedThread === 'general' ? 'General' : 'directo'}`}
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-4 w-4 text-white stroke-[2.25]" />
               </button>
             )}
           </div>
@@ -924,10 +1003,10 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                         {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
                           <button
                             onClick={() => handleDeleteMessage(msg.id)}
-                            className="p-1 bg-red-50 text-red-600 hover:bg-red-100 rounded transition-all cursor-pointer shadow-sm shrink-0 opacity-100 md:opacity-0 md:group-hover/msg:opacity-100"
+                            className="p-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md transition-all cursor-pointer shadow-md shrink-0 opacity-100 md:opacity-0 md:group-hover/msg:opacity-100 flex items-center justify-center border border-red-500/30"
                             title="Eliminar mensaje"
                           >
-                            <Trash2 className="h-3 w-3" />
+                            <Trash2 className="h-3.5 w-3.5 text-white stroke-[2.25]" />
                           </button>
                         )}
                       </div>
