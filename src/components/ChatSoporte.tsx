@@ -594,7 +594,7 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
       {isOpen && (
         <div 
           id="chat-dialogue-window" 
-          className="absolute bottom-20 right-0 w-85 sm:w-96 h-[420px] bg-white rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-6 duration-300"
+          className="absolute bottom-20 right-0 w-[92vw] sm:w-[440px] max-w-[440px] h-[450px] bg-white rounded-2xl border border-slate-200 shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-6 duration-300 z-50"
         >
           {/* Header */}
           <div className="bg-[#1A2D7C] p-4 text-white flex items-center justify-between border-b border-white/10 shrink-0">
@@ -641,12 +641,12 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
           </div>
 
           {/* Thread selector */}
-          <div className="bg-slate-100 p-2.5 border-b border-slate-200 flex items-center gap-2 shrink-0">
-            <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider font-space">Canal:</span>
+          <div className="bg-slate-100 p-2.5 border-b border-slate-200 flex items-center gap-1.5 shrink-0">
+            <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider font-space shrink-0">Canal:</span>
             <select
               value={selectedThread}
               onChange={(e) => setSelectedThread(e.target.value)}
-              className="flex-1 text-[11px] font-bold p-1 bg-white border border-slate-300 rounded focus:outline-none focus:border-[#1A2D7C]"
+              className="flex-1 min-w-0 text-[11px] font-bold p-1 bg-white border border-slate-300 rounded focus:outline-none focus:border-[#1A2D7C] truncate cursor-pointer"
             >
               <option value="general">
                 {hasUnreadInThread('general') ? '🔴 ' : ''}📢 Soporte General (Anuncios)
@@ -657,76 +657,79 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                 </option>
               ))}
             </select>
-            {allowedRecipients.length > 0 && (
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const targetUser = selectedThread !== 'general' 
-                      ? allowedRecipients.find(r => r.id === selectedThread) 
-                      : allowedRecipients[0];
-                    if (targetUser) {
-                      try {
-                        await startVideoCall(
-                          currentUser.id,
-                          currentUser.nombre,
-                          currentUser.role,
-                          targetUser.id,
-                          targetUser.nombre,
-                          undefined,
-                          'voice'
-                        );
-                      } catch (e) {
-                        console.error("Error starting voice call:", e);
+            
+            <div className="flex items-center gap-1 shrink-0">
+              {allowedRecipients.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const targetUser = selectedThread !== 'general' 
+                        ? allowedRecipients.find(r => r.id === selectedThread) 
+                        : allowedRecipients[0];
+                      if (targetUser) {
+                        try {
+                          await startVideoCall(
+                            currentUser.id,
+                            currentUser.nombre,
+                            currentUser.role,
+                            targetUser.id,
+                            targetUser.nombre,
+                            undefined,
+                            'voice'
+                          );
+                        } catch (e) {
+                          console.error("Error starting voice call:", e);
+                        }
                       }
-                    }
-                  }}
-                  className="p-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center"
-                  title={selectedThread !== 'general' ? "Llamada de voz" : `Llamar a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
-                >
-                  <Phone className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const targetUser = selectedThread !== 'general' 
-                      ? allowedRecipients.find(r => r.id === selectedThread) 
-                      : allowedRecipients[0];
-                    if (targetUser) {
-                      try {
-                        await startVideoCall(
-                          currentUser.id,
-                          currentUser.nombre,
-                          currentUser.role,
-                          targetUser.id,
-                          targetUser.nombre,
-                          undefined,
-                          'video'
-                        );
-                      } catch (e) {
-                        console.error("Error starting video call:", e);
+                    }}
+                    className="p-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0"
+                    title={selectedThread !== 'general' ? "Llamada de voz" : `Llamar a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
+                  >
+                    <Phone className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const targetUser = selectedThread !== 'general' 
+                        ? allowedRecipients.find(r => r.id === selectedThread) 
+                        : allowedRecipients[0];
+                      if (targetUser) {
+                        try {
+                          await startVideoCall(
+                            currentUser.id,
+                            currentUser.nombre,
+                            currentUser.role,
+                            targetUser.id,
+                            targetUser.nombre,
+                            undefined,
+                            'video'
+                          );
+                        } catch (e) {
+                          console.error("Error starting video call:", e);
+                        }
                       }
-                    }
-                  }}
-                  className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center"
-                  title={selectedThread !== 'general' ? "Videollamada Google Meet" : `Videollamada a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
-                >
-                  <Video className="h-4 w-4" />
-                </button>
-              </div>
-            )}
+                    }}
+                    className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0"
+                    title={selectedThread !== 'general' ? "Videollamada Google Meet" : `Videollamada a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
+                  >
+                    <Video className="h-4 w-4" />
+                  </button>
+                </>
+              )}
 
-            {/* Admin Delete Entire Thread Chat Button */}
-            {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
-              <button
-                type="button"
-                onClick={() => handleClearThread(selectedThread)}
-                className="p-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0 border border-red-500/30"
-                title={`Borrar historial del chat ${selectedThread === 'general' ? 'General' : 'directo'}`}
-              >
-                <Trash2 className="h-4 w-4 text-white stroke-[2.25]" />
-              </button>
-            )}
+              {/* Admin Delete Entire Thread Chat Button */}
+              {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
+                <button
+                  type="button"
+                  onClick={() => handleClearThread(selectedThread)}
+                  className="p-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0 border border-red-500/30"
+                  title={`Borrar historial del chat ${selectedThread === 'general' ? 'General' : 'directo'}`}
+                >
+                  <Trash2 className="h-4 w-4 text-white stroke-[2.25]" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Write permission warning notice or helpful tips */}

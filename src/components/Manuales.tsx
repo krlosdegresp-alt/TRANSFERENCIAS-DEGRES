@@ -2352,8 +2352,8 @@ export default function Manuales({ currentUser }: ManualesProps) {
 
       {/* PDF Export & Print Preview Modal */}
       {pdfPreviewOpen && (
-        <div className="pdf-preview-modal-backdrop fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-start overflow-y-auto p-3 sm:p-6">
-          <div className="pdf-preview-modal-card w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[92vh]">
+        <div className="pdf-preview-modal-backdrop fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-start overflow-y-auto p-2 sm:p-5">
+          <div className="pdf-preview-modal-card w-full max-w-[96vw] lg:max-w-7xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto flex flex-col max-h-[94vh]">
             
             {/* Modal Top Bar (Hidden on print) */}
             <div className="no-print bg-[#1A2D7C] text-white p-4 px-6 flex flex-wrap items-center justify-between gap-3 shadow-md border-b-4 border-[#F47920]">
@@ -2365,7 +2365,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
                   <h3 className="text-xs sm:text-sm font-black uppercase font-space tracking-wide text-white">
                     Vista Previa Oficial del Manual para Guardar en PDF
                   </h3>
-                  <p className="text-[10px] text-slate-300 font-medium">
+                  <p className="text-[10.5px] text-slate-300 font-medium">
                     Elaborado por el <strong>Área de TI</strong> • Al imprimir, elija la opción <strong>"Guardar como PDF"</strong> en su navegador.
                   </p>
                 </div>
@@ -2414,7 +2414,7 @@ export default function Manuales({ currentUser }: ManualesProps) {
 
             {/* Modal Body Container */}
             <div className="pdf-preview-modal-body flex-1 overflow-y-auto p-4 md:p-8 bg-slate-100/80 text-slate-800 scrollbar-thin">
-              <div className="printable-document-container max-w-4xl mx-auto bg-white p-6 md:p-12 shadow-lg rounded-xl border border-slate-200 text-xs leading-relaxed font-sans">
+              <div className="printable-document-container max-w-5xl xl:max-w-6xl mx-auto bg-white p-6 md:p-12 shadow-lg rounded-xl border border-slate-200 text-sm sm:text-base leading-relaxed font-sans">
                 
                 {/* Document Header */}
                 <div className="flex items-center justify-between border-b-2 border-[#1A2D7C] pb-4 mb-8">
