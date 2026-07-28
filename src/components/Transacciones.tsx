@@ -164,6 +164,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     const matchesSede = 
       sedeFilter === 'Todas' || 
       tx.sede === sedeFilter ||
+      tx.sede === 'Desconocida' ||
       (cuentaFilter !== 'Todas' && matchesCuenta);
 
     return matchesSearch && matchesComprobante && matchesStatus && matchesSede && matchesMin && matchesMax && matchesFecha && matchesCuenta;

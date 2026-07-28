@@ -254,8 +254,7 @@ export function esMovimientoIrrelevante(valor: number, descripcion: string): boo
     'COBRO INTERES',
     'SALDO EN CONTRA',
     'INTERES DEBITO',
-    'EGRESO',
-    'ABONO'
+    'EGRESO'
   ];
 
   return wordsToDiscard.some(word => desc.includes(word));
