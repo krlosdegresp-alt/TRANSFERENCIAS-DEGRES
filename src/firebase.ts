@@ -496,6 +496,7 @@ export async function uploadBankTransactions(
   fileBlob?: File | null
 ): Promise<{ imported: number; duplicates: number }> {
   const current = getTransactions();
+  const currentMap = new Map(current.map(tx => [tx.id, tx]));
   const currentKeysSet = new Set(current.map(tx => tx.llaveUnica));
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -508,23 +509,38 @@ export async function uploadBankTransactions(
       duplicates++;
       const existingTx = current.find(t => t.llaveUnica === tx.llaveUnica);
       if (tx.identificada && existingTx && !existingTx.identificada) {
-        toAdd.push({
+        const updatedTx = {
           ...existingTx,
           identificada: true,
           fechaIdentificacion: tx.fechaIdentificacion || getColombiaDateTime().dateTimeStr,
           usuarioIdentificacion: tx.usuarioIdentificacion || uploaderName,
           asesor: tx.asesor || null,
           tipoDocumento: tx.tipoDocumento || null
-        });
+        };
+        toAdd.push(updatedTx);
+        currentMap.set(updatedTx.id, updatedTx);
       }
     } else {
-      toAdd.push({
+      const newTx = {
         ...tx,
         batchId
-      });
+      };
+      toAdd.push(newTx);
+      currentMap.set(newTx.id, newTx);
+      currentKeysSet.add(tx.llaveUnica);
       imported++;
     }
   });
+
+  const updatedTxs = Array.from(currentMap.values());
+  updatedTxs.sort((a, b) => {
+    const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
+    const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
+    return dateTimeB.localeCompare(dateTimeA);
+  });
+
+  // Optimistic immediate update to local storage & listeners
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(updatedTxs));
 
   const finalFileName = fileName || 'archivo_movimientos.xlsx';
 
@@ -538,6 +554,11 @@ export async function uploadBankTransactions(
     totalImportados: imported,
     totalDuplicados: duplicates
   };
+
+  batches.unshift(newBatch);
+  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batches));
+
+  notifyListeners();
 
   // 2. Persistent upload & db save synchronously
   try {
@@ -559,7 +580,7 @@ export async function uploadBankTransactions(
       }
     }
 
-    // Save transactions
+    // Save transactions to Firestore
     if (toAdd.length > 0) {
       const chunks = [];
       for (let i = 0; i < toAdd.length; i += 500) {
