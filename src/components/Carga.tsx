@@ -148,47 +148,54 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
     setUploadSummary(null);
 
     try {
-      let buffer: ArrayBuffer;
-      let finalFile = file;
+      let list: Transaction[] = [];
+      let cierres: CierreCaja[] = [];
 
-      // Check if file is a ZIP archive
+      // Check if file is a ZIP archive or compressed file
       if (file.name.toLowerCase().endsWith('.zip')) {
         const zip = new JSZip();
         const arrayBuffer = await file.arrayBuffer();
         const loadedZip = await zip.loadAsync(arrayBuffer);
-        
-        // Find the first excel or csv file in the zip
-        const targetFileKey = Object.keys(loadedZip.files).find(key => {
+
+        // Find ALL excel or csv files in the zip
+        const targetFileKeys = Object.keys(loadedZip.files).filter(key => {
           const lower = key.toLowerCase();
-          return (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv')) && !key.includes('__MACOSX');
+          const isSpreadsheet = lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv');
+          return isSpreadsheet && !key.includes('__MACOSX') && !loadedZip.files[key].dir;
         });
 
-        if (!targetFileKey) {
-          throw new Error('No se encontró ningún archivo de Excel (.xlsx, .xls) o CSV dentro del archivo ZIP de la carpeta del banco.');
+        if (targetFileKeys.length === 0) {
+          throw new Error('No se encontró ningún archivo de Excel (.xlsx, .xls) o CSV dentro del archivo ZIP.');
         }
 
-        const zipFile = loadedZip.files[targetFileKey];
-        const extractedBuffer = await zipFile.async('arraybuffer');
-        const extractedFileName = zipFile.name.split('/').pop() || zipFile.name;
-        
-        buffer = extractedBuffer;
-        
-        // Simulate a real File object for the preview representation
-        finalFile = new File([extractedBuffer], extractedFileName, {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        });
+        for (const key of targetFileKeys) {
+          const zipFile = loadedZip.files[key];
+          const extractedBuffer = await zipFile.async('arraybuffer');
+
+          const fileList = parseExcelBankFile(extractedBuffer, targetSede);
+          const fileCierres = parseExcelCierres(extractedBuffer);
+
+          list = [...list, ...fileList];
+          cierres = [...cierres, ...fileCierres];
+        }
+
+        if (list.length === 0 && cierres.length === 0) {
+          throw new Error('No se encontraron transacciones válidas dentro de los archivos de Excel del archivo ZIP.');
+        }
+
+        setSelectedFile(file);
+        setParsedQueue(list);
+        setParsedCierres(cierres);
       } else {
-        buffer = await file.arrayBuffer();
+        const buffer = await file.arrayBuffer();
+        setSelectedFile(file);
+
+        list = parseExcelBankFile(buffer, targetSede);
+        cierres = parseExcelCierres(buffer);
+
+        setParsedQueue(list);
+        setParsedCierres(cierres);
       }
-
-      setSelectedFile(finalFile);
-
-      // Parse spreadsheet using the custom parser
-      const list = parseExcelBankFile(buffer, targetSede);
-      const cierres = parseExcelCierres(buffer);
-
-      setParsedQueue(list);
-      setParsedCierres(cierres);
     } catch (err: any) {
       console.error('Error parsing spreadsheet file', err);
       const msg = err?.message || 'Asegúrate de subir un archivo de formato .xlsx, .xls, .csv o un .zip válido.';

@@ -273,8 +273,13 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
     
     if (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') {
       return activeUsers;
+    } else if (currentUser.role === 'Asesor') {
+      // Asesores can talk with Cajeras, Tesoreras, and Admins
+      return activeUsers.filter(u => u.role === 'Admin' || u.role === 'Tesorera' || u.role === 'Cajera');
+    } else if (currentUser.role === 'Cajera') {
+      // Cajeras can talk with Admins, Tesoreras, and Asesores
+      return activeUsers.filter(u => u.role === 'Admin' || u.role === 'Tesorera' || u.role === 'Asesor');
     } else {
-      // Cajeras and Asesores can only chat/call Admins and Treasurers
       return activeUsers.filter(u => u.role === 'Admin' || u.role === 'Tesorera');
     }
   };
