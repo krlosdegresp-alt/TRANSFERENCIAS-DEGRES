@@ -33,7 +33,8 @@ import {
   Undo2,
   Camera,
   Image as ImageIcon,
-  Loader2
+  Loader2,
+  Search
 } from 'lucide-react';
 
 interface ChatSoporteProps {
@@ -92,6 +93,7 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
   // Other options are direct user IDs representing the direct chat thread with that user
   const [selectedThread, setSelectedThread] = useState<string>('general');
   const [allUsers, setAllUsers] = useState<User[]>(() => getUsers());
+  const [userSearchQuery, setUserSearchQuery] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -259,32 +261,24 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
     return () => unsubscribe();
   }, []);
 
-  // Compute allowed chat recipients for the current user based on strict platform rules:
-  // - Admins and Treasurers can talk to ANY active (non-blocked) user.
-  // - Cajeras and Advisors (Asesores) can talk ONLY to Admins and Treasurers.
-  // - Advisors cannot speak with other advisors, and cashiers cannot speak with other cashiers.
+  // Compute allowed chat recipients for the current user:
+  // All active (non-blocked) users can communicate with anyone without restriction.
   const getAllowedRecipients = (): User[] => {
     const userMap = new Map<string, User>();
     PREDEFINED_USERS.forEach(u => userMap.set(u.id, u));
     allUsers.forEach(u => userMap.set(u.id, u));
     const combinedUsers = Array.from(userMap.values());
 
-    const activeUsers = combinedUsers.filter(u => !u.isBlocked && u.id !== currentUser.id);
-    
-    if (currentUser.role === 'Admin' || currentUser.role === 'Tesorera') {
-      return activeUsers;
-    } else if (currentUser.role === 'Asesor') {
-      // Asesores can talk with Cajeras, Tesoreras, and Admins
-      return activeUsers.filter(u => u.role === 'Admin' || u.role === 'Tesorera' || u.role === 'Cajera');
-    } else if (currentUser.role === 'Cajera') {
-      // Cajeras can talk with Admins, Tesoreras, and Asesores
-      return activeUsers.filter(u => u.role === 'Admin' || u.role === 'Tesorera' || u.role === 'Asesor');
-    } else {
-      return activeUsers.filter(u => u.role === 'Admin' || u.role === 'Tesorera');
-    }
+    return combinedUsers.filter(u => !u.isBlocked && u.id !== currentUser.id);
   };
 
   const allowedRecipients = getAllowedRecipients();
+
+  const filteredRecipients = allowedRecipients.filter(r => {
+    if (!userSearchQuery.trim()) return true;
+    const q = userSearchQuery.toLowerCase().trim();
+    return r.nombre.toLowerCase().includes(q) || r.role.toLowerCase().includes(q);
+  });
 
   // Parse custom human timestamp "YYYY-MM-DD HH:MM:SS" into epoch milliseconds for comparisons
   const parseTime = (timestampStr: string): number => {
@@ -646,12 +640,15 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
           </div>
 
           {/* Thread selector */}
-          <div className="bg-slate-100 p-2.5 border-b border-slate-200 flex items-center gap-1.5 shrink-0">
+          <div className="bg-slate-100 p-2 border-b border-slate-200 flex items-center gap-1.5 shrink-0">
             <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider font-space shrink-0">Canal:</span>
             <select
               value={selectedThread}
-              onChange={(e) => setSelectedThread(e.target.value)}
-              className="flex-1 min-w-0 text-[11px] font-bold p-1 bg-white border border-slate-300 rounded focus:outline-none focus:border-[#1A2D7C] truncate cursor-pointer"
+              onChange={(e) => {
+                setSelectedThread(e.target.value);
+                setUserSearchQuery('');
+              }}
+              className="flex-1 min-w-0 text-[11px] font-bold p-1.5 bg-white border border-slate-300 rounded focus:outline-none focus:border-[#1A2D7C] truncate cursor-pointer"
             >
               <option value="general">
                 {hasUnreadInThread('general') ? '🔴 ' : ''}📢 Soporte General (Anuncios)
@@ -689,7 +686,7 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                       }
                     }}
                     className="p-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0"
-                    title={selectedThread !== 'general' ? "Llamada de voz" : `Llamar a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
+                    title={selectedThread !== 'general' ? "Llamada de voz" : `Llamar a (${allowedRecipients[0]?.nombre || 'Soporte'})`}
                   >
                     <Phone className="h-4 w-4" />
                   </button>
@@ -716,7 +713,7 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
                       }
                     }}
                     className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0"
-                    title={selectedThread !== 'general' ? "Videollamada Google Meet" : `Videollamada a Soporte (${allowedRecipients[0]?.nombre || 'Soporte'})`}
+                    title={selectedThread !== 'general' ? "Videollamada Google Meet" : `Videollamada a (${allowedRecipients[0]?.nombre || 'Soporte'})`}
                   >
                     <Video className="h-4 w-4" />
                   </button>
@@ -736,6 +733,119 @@ export default function ChatSoporte({ currentUser }: ChatSoporteProps) {
               )}
             </div>
           </div>
+
+          {/* Intuitive User Directory & Searcher ONLY inside Soporte General */}
+          {selectedThread === 'general' && (
+            <div className="bg-white border-b border-slate-200 p-3 shrink-0 shadow-xs">
+              <div className="relative">
+                <Search className="h-4 w-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="🔍 Buscar persona en la empresa por nombre o cargo para chatear o llamar..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                  className="w-full text-xs font-medium pl-8 pr-8 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:border-[#1A2D7C] focus:bg-white transition-all placeholder:text-slate-400"
+                />
+                {userSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setUserSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 cursor-pointer"
+                    title="Limpiar búsqueda"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Interactive Search Results Directory */}
+              {userSearchQuery.trim() !== '' && (
+                <div className="mt-2 max-h-52 overflow-y-auto border border-slate-200 rounded-lg bg-white divide-y divide-slate-100 shadow-sm">
+                  {filteredRecipients.length === 0 ? (
+                    <div className="p-3 text-center text-xs text-slate-500 italic">
+                      No se encontraron compañeros con "{userSearchQuery}"
+                    </div>
+                  ) : (
+                    filteredRecipients.map((user) => (
+                      <div
+                        key={user.id}
+                        className="p-2.5 flex items-center justify-between hover:bg-slate-50 transition-colors gap-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-7 h-7 rounded-full bg-indigo-100 text-[#1A2D7C] font-bold text-xs flex items-center justify-center shrink-0">
+                            {user.nombre.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-800 truncate">{user.nombre}</p>
+                            <p className="text-[10px] text-slate-500 font-medium truncate">{user.role}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedThread(user.id);
+                              setUserSearchQuery('');
+                            }}
+                            className="px-2.5 py-1 bg-[#1A2D7C] hover:bg-indigo-900 text-white rounded text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                            title={`Chatear con ${user.nombre}`}
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                            <span>Chat</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await startVideoCall(
+                                  currentUser.id,
+                                  currentUser.nombre,
+                                  currentUser.role,
+                                  user.id,
+                                  user.nombre,
+                                  undefined,
+                                  'voice'
+                                );
+                              } catch (e) {
+                                console.error("Error starting voice call:", e);
+                              }
+                            }}
+                            className="p-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded transition-colors cursor-pointer shadow-xs"
+                            title={`Llamada de voz a ${user.nombre}`}
+                          >
+                            <Phone className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await startVideoCall(
+                                  currentUser.id,
+                                  currentUser.nombre,
+                                  currentUser.role,
+                                  user.id,
+                                  user.nombre,
+                                  undefined,
+                                  'video'
+                                );
+                              } catch (e) {
+                                console.error("Error starting video call:", e);
+                              }
+                            }}
+                            className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors cursor-pointer shadow-xs"
+                            title={`Videollamada con ${user.nombre}`}
+                          >
+                            <Video className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Write permission warning notice or helpful tips */}
           {isWriteLocked && (
