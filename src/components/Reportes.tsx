@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Transaction, Sede, User, ReportConfig } from '../types';
-import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h } from '../utils/formato';
+import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h, formatTime12h } from '../utils/formato';
 import { 
   getAdvisors, 
   getCierresCaja, 
@@ -37,7 +37,9 @@ import {
   ArrowLeftRight,
   Settings,
   Eye,
-  EyeOff
+  EyeOff,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface ChartData {
@@ -227,6 +229,7 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
   );
   const [motivoDesbloqueoLocal, setMotivoDesbloqueoLocal] = useState('');
   const [mostrarFormSolicitud, setMostrarFormSolicitud] = useState(false);
+  const [showIdentifiedListCierre, setShowIdentifiedListCierre] = useState(false);
 
   // Fetch all cierres
   const activeCierres = getCierresCaja();
@@ -239,19 +242,22 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   ).reduce((sum, tx) => sum + tx.valor, 0);
 
-  // 2. Total Identified (Conciliado) for selected closure date & branch
-  const totalIdentificadoCierre = transactions.filter(
-    t => t.fecha === cierreFecha && t.sede === cierreSede && t.identificada && !t.esHistorico
-  ).reduce((sum, tx) => sum + tx.valor, 0);
+  // 2. Total Identified (Conciliado) for selected closure date & branch (por fecha de IDENTIFICACIÓN)
+  const identifiedTxsCierre = transactions.filter(
+    t => t.identificada &&
+         t.tipoDocumento !== 'Ignorado' &&
+         t.sede === cierreSede &&
+         !t.esHistorico &&
+         ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
+  );
+  const totalIdentificadoCierre = identifiedTxsCierre.reduce((sum, tx) => sum + tx.valor, 0);
 
   // 3. Number of identified transactions
-  const numIdentificadosCierre = transactions.filter(
-    t => t.fecha === cierreFecha && t.sede === cierreSede && t.identificada && !t.esHistorico
-  ).length;
+  const numIdentificadosCierre = identifiedTxsCierre.length;
 
   // 4. Number of pending transactions
   const numPendientesCierre = transactions.filter(
-    t => t.fecha === cierreFecha && t.sede === cierreSede && !t.identificada && !t.esHistorico
+    t => t.fecha === cierreFecha && t.sede === cierreSede && !t.identificada && !t.esHistorico && t.tipoDocumento !== 'Ignorado'
   ).length;
 
   // The difference/descuadre is totalIdentificadoCierre - totalBancoCierre
@@ -1388,6 +1394,43 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
                     <div className="p-3 bg-rose-50 border border-rose-200 text-rose-850 rounded-xl text-center text-[10.5px] font-black uppercase tracking-wider font-space flex flex-col items-center">
                       <span>PAGOS PENDIENTES POR IDENTIFICAR</span>
                       <span className="font-mono mt-0.5 text-xs text-rose-900">Falta identificar {formatCOP(Math.abs(diferenciaCierre))}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Desplegable para ver transacciones identificadas que componen este cierre */}
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowIdentifiedListCierre(!showIdentifiedListCierre)}
+                    className="w-full py-2 px-3 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-[10.5px] font-black uppercase text-slate-700 tracking-wider flex items-center justify-between transition-colors cursor-pointer"
+                  >
+                    <span>Ver Transacciones Identificadas ({numIdentificadosCierre})</span>
+                    {showIdentifiedListCierre ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
+                  {showIdentifiedListCierre && (
+                    <div className="mt-2 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-xl p-2.5 space-y-2">
+                      {identifiedTxsCierre.length === 0 ? (
+                        <p className="text-center text-[10px] text-slate-400 py-3 uppercase font-bold">No hay transacciones identificadas para este día</p>
+                      ) : (
+                        identifiedTxsCierre.map(tx => (
+                          <div key={tx.id} className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-left space-y-1">
+                            <div className="flex justify-between items-start">
+                              <span className="text-[10px] font-black text-slate-800 uppercase">
+                                {tx.tipoDocumento || 'Remisión'} {tx.nroReciboCaja ? `#${tx.nroReciboCaja}` : ''}
+                              </span>
+                              <span className="text-xs font-mono font-black text-emerald-700">
+                                {formatCOP(tx.valor)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-[9.5px] text-slate-500">
+                              <span>Asesor: <strong className="text-slate-700">{tx.asesor || 'Sin Asesor'}</strong></span>
+                              <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                            </div>
+                            <p className="text-[9px] text-slate-600 truncate" title={tx.descripcion}>{tx.descripcion}</p>
+                          </div>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>

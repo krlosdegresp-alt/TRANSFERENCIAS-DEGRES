@@ -11,10 +11,11 @@ import {
   rechazarDesbloqueoCierre,
   subscribeToDatabase,
   requestTransactionChange,
-  resolveTransactionChange
+  resolveTransactionChange,
+  getUploadBatches
 } from '../firebase';
-import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h } from '../utils/formato';
-import { Transaction, User, Sede, CierreCaja } from '../types';
+import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h, formatTime12h } from '../utils/formato';
+import { Transaction, User, Sede, CierreCaja, UploadBatch } from '../types';
 import { 
   FileCheck2, 
   Search, 
@@ -32,7 +33,9 @@ import {
   Unlock,
   Send,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface TransaccionesProps {
@@ -85,16 +88,28 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const [mostrarFormSolicitud, setMostrarFormSolicitud] = useState(false);
   const [cierresCajaList, setCierresCajaList] = useState<CierreCaja[]>(() => getCierresCaja());
   const [showCierreModal, setShowCierreModal] = useState(false);
+  const [showIdentifiedListCierre, setShowIdentifiedListCierre] = useState(false);
   const [coincideSeleccion, setCoincideSeleccion] = useState<boolean | null>(true);
   const [motivoDiferenciaInput, setMotivoDiferenciaInput] = useState('');
+  const [lastUploadBatch, setLastUploadBatch] = useState<UploadBatch | null>(() => {
+    const batches = getUploadBatches();
+    return batches.length > 0 ? batches[0] : null;
+  });
 
-  // Subscription to keep closures state synchronized with Firestore events
+  // Subscription to keep closures and last upload batch state synchronized with Firestore events
   useEffect(() => {
     const unsubscribe = subscribeToDatabase(() => {
       setCierresCajaList(getCierresCaja());
+      const batches = getUploadBatches();
+      setLastUploadBatch(batches.length > 0 ? batches[0] : null);
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const batches = getUploadBatches();
+    setLastUploadBatch(batches.length > 0 ? batches[0] : null);
+  }, [transactions]);
 
   // Automatically default closing date to the most recent transaction's date to match active operations context
   useEffect(() => {
@@ -117,10 +132,8 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     }
   }, [cierreFecha, cierreSede, cierresCajaList]);
 
-  // Filter transactions
-  // Exclude archived/historical transactions unless we're searching explicitly.
-  const filteredTransactions = transactions.filter(tx => {
-    // Hide historic records in active validation screen
+  // Base filter (without status filter) for widgets and reactive totals
+  const baseFilteredTransactions = transactions.filter(tx => {
     if (tx.esHistorico) return false;
 
     const matchesSearch = 
@@ -134,18 +147,14 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
       (tx.comprobante || '').toLowerCase().includes(comprobanteFilter.trim().toLowerCase()) ||
       (tx.oficina || '').toLowerCase().includes(comprobanteFilter.trim().toLowerCase());
 
-    const matchesStatus = 
-      statusFilter === 'all' ||
-      (statusFilter === 'pendientes' && !tx.identificada) ||
-      (statusFilter === 'identificadas' && tx.identificada);
-
     const valMin = parseFloat(montoMinFilter);
     const matchesMin = isNaN(valMin) || tx.valor >= valMin;
 
     const valMax = parseFloat(montoMaxFilter);
     const matchesMax = isNaN(valMax) || tx.valor <= valMax;
 
-    const matchesFecha = !fechaFilter || tx.fecha === fechaFilter;
+    const txFechaIdent = tx.fechaIdentificacion ? tx.fechaIdentificacion.slice(0, 10) : tx.fecha;
+    const matchesFecha = !fechaFilter || tx.fecha === fechaFilter || (tx.identificada && txFechaIdent === fechaFilter);
 
     const txCuentaClean = (tx.cuenta || '').toLowerCase();
     let matchesCuenta = false;
@@ -167,7 +176,15 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
       tx.sede === 'Desconocida' ||
       (cuentaFilter !== 'Todas' && matchesCuenta);
 
-    return matchesSearch && matchesComprobante && matchesStatus && matchesSede && matchesMin && matchesMax && matchesFecha && matchesCuenta;
+    return matchesSearch && matchesComprobante && matchesSede && matchesMin && matchesMax && matchesFecha && matchesCuenta;
+  });
+
+  const filteredTransactions = baseFilteredTransactions.filter(tx => {
+    const matchesStatus = 
+      statusFilter === 'all' ||
+      (statusFilter === 'pendientes' && !tx.identificada) ||
+      (statusFilter === 'identificadas' && tx.identificada);
+    return matchesStatus;
   });
 
   const handleStartIdentification = (tx: Transaction) => {
@@ -219,7 +236,13 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const bankPaymentsForDate = transactions.filter(
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   );
-  const identifiedPaymentsForDate = bankPaymentsForDate.filter(t => t.identificada);
+  const identifiedPaymentsForDate = transactions.filter(
+    t => t.identificada &&
+         t.tipoDocumento !== 'Ignorado' &&
+         t.sede === cierreSede &&
+         !t.esHistorico &&
+         ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
+  );
 
   const numIdentificadosCierre = identifiedPaymentsForDate.length;
   const totalIdentificadoCierre = identifiedPaymentsForDate.reduce((sum, tx) => sum + tx.valor, 0);
@@ -339,17 +362,26 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
 
         {/* Counter Summary & Action Button */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="bg-white border-2 border-slate-200 px-5 py-2.5 rounded-2xl text-right min-w-[130px] shadow-sm">
-            <p className="text-[9.5px] uppercase text-slate-400 font-extrabold tracking-widest leading-none">PENDIENTES HOY</p>
+          <div className="bg-white border-2 border-slate-200 px-4 py-2.5 rounded-2xl text-right min-w-[140px] shadow-sm">
+            <p className="text-[9.5px] uppercase text-slate-400 font-extrabold tracking-widest leading-none">
+              PENDIENTES {sedeFilter !== 'Todas' ? `• ${sedeFilter.toUpperCase()}` : ''}
+            </p>
             <p id="stat-pending-count" className="text-xl font-black text-[#F47920] font-space mt-1 leading-none">
-              {transactions.filter(t => !t.identificada && !t.esHistorico).length.toString().padStart(2, '0')}
+              {baseFilteredTransactions.filter(t => !t.identificada && t.tipoDocumento !== 'Ignorado').length.toString().padStart(2, '0')}
             </p>
           </div>
-          <div className="bg-[#1A2D7C] text-white px-5 py-2.5 rounded-2xl text-right min-w-[130px] shadow-lg">
-            <p className="text-[9.5px] uppercase text-white/70 font-extrabold tracking-widest leading-none">IDENTIFICADAS</p>
-            <p id="stat-solved-count" className="text-xl font-black text-white font-space mt-1 leading-none">
-              {transactions.filter(t => t.identificada && !t.esHistorico).length.toString().padStart(2, '0')}
+          <div className="bg-[#1A2D7C] text-white px-4 py-2.5 rounded-2xl text-right min-w-[180px] shadow-lg">
+            <p className="text-[9.5px] uppercase text-white/70 font-extrabold tracking-widest leading-none">
+              IDENTIFICADAS {sedeFilter !== 'Todas' ? `• ${sedeFilter.toUpperCase()}` : ''}
             </p>
+            <div className="flex items-baseline justify-end gap-2 mt-1">
+              <p id="stat-solved-count" className="text-xl font-black text-white font-space leading-none">
+                {baseFilteredTransactions.filter(t => t.identificada && t.tipoDocumento !== 'Ignorado').length.toString().padStart(2, '0')} <span className="text-xs font-normal opacity-80">txs</span>
+              </p>
+              <span className="text-xs font-mono font-bold text-emerald-300">
+                {formatCOP(baseFilteredTransactions.filter(t => t.identificada && t.tipoDocumento !== 'Ignorado').reduce((sum, t) => sum + t.valor, 0))}
+              </span>
+            </div>
           </div>
 
           <button
@@ -606,6 +638,19 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
             >
               Limpiar
             </button>
+          )}
+
+          {/* Indicador discreto y compacto de última carga dentro del contenedor de filtros */}
+          {lastUploadBatch && (
+            <div className="ml-auto flex items-center gap-1.5 bg-emerald-50 text-emerald-800 px-3 py-1.5 rounded-xl border border-emerald-200/80 text-[11px] font-medium" title="Última carga de extractos bancarios">
+              <Clock className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+              <span>
+                Última carga:{' '}
+                <strong className="font-bold font-mono text-emerald-900">
+                  {formatDateTime12h(lastUploadBatch.fechaCarga)}
+                </strong>
+              </span>
+            </div>
           )}
         </div>
       </div>
@@ -1184,8 +1229,8 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
 
       {/* MODAL DILIGENCIAR CIERRE DE CAJA */}
       {showCierreModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full p-6 md:p-8 animate-in zoom-in-95 duration-200 relative overflow-hidden">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200 overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-xl w-full max-h-[88vh] overflow-y-auto p-6 md:p-8 animate-in zoom-in-95 duration-200 relative my-auto">
             {/* Top decorative stripe */}
             <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-600 to-[#1A2D7C]" />
 
@@ -1282,6 +1327,43 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                       <p className="text-slate-700 italic font-semibold">{currentCierre.motivoDiferencia}</p>
                     </div>
                   )}
+
+                  {/* Expandable Identified Transactions List */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowIdentifiedListCierre(!showIdentifiedListCierre)}
+                      className="w-full py-2 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-[10.5px] font-black uppercase text-slate-700 tracking-wider flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <span>Ver Transacciones Identificadas ({numIdentificadosCierre})</span>
+                      {showIdentifiedListCierre ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+                    {showIdentifiedListCierre && (
+                      <div className="mt-2 max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-xl p-2.5 space-y-2">
+                        {identifiedPaymentsForDate.length === 0 ? (
+                          <p className="text-center text-[10px] text-slate-400 py-3 uppercase font-bold">No hay transacciones identificadas para este cierre</p>
+                        ) : (
+                          identifiedPaymentsForDate.map(tx => (
+                            <div key={tx.id} className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-left space-y-1">
+                              <div className="flex justify-between items-start">
+                                <span className="text-[10px] font-black text-slate-800 uppercase">
+                                  {tx.tipoDocumento || 'Remisión'} {tx.nroReciboCaja ? `#${tx.nroReciboCaja}` : ''}
+                                </span>
+                                <span className="text-xs font-mono font-black text-emerald-700">
+                                  {formatCOP(tx.valor)}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center text-[9.5px] text-slate-500">
+                                <span>Asesor: <strong className="text-slate-700">{tx.asesor || 'Sin Asesor'}</strong></span>
+                                <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                              </div>
+                              <p className="text-[9px] text-slate-600 truncate" title={tx.descripcion}>{tx.descripcion}</p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Request unlock option */}
@@ -1346,6 +1428,43 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                       <span className="text-[10px] font-bold text-slate-300 uppercase block">Total en Aplicativo (Banco):</span>
                       <span className="text-xl font-black font-mono text-amber-300 block mt-0.5">{formatCOP(totalAplicativoCierre)}</span>
                     </div>
+                  </div>
+
+                  {/* Expandable Identified Transactions List */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowIdentifiedListCierre(!showIdentifiedListCierre)}
+                      className="w-full py-2 px-3 bg-slate-800/80 hover:bg-slate-800 border border-slate-700 rounded-xl text-[10.5px] font-black uppercase text-white tracking-wider flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <span>Ver Transacciones Identificadas ({numIdentificadosCierre})</span>
+                      {showIdentifiedListCierre ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+                    {showIdentifiedListCierre && (
+                      <div className="mt-2 max-h-52 overflow-y-auto bg-slate-900/90 border border-slate-700 rounded-xl p-2.5 space-y-2">
+                        {identifiedPaymentsForDate.length === 0 ? (
+                          <p className="text-center text-[10px] text-slate-400 py-3 uppercase font-bold">No hay transacciones identificadas para este cierre</p>
+                        ) : (
+                          identifiedPaymentsForDate.map(tx => (
+                            <div key={tx.id} className="p-2 bg-slate-800/90 border border-slate-700 rounded-lg text-left space-y-1">
+                              <div className="flex justify-between items-start">
+                                <span className="text-[10px] font-black text-white uppercase">
+                                  {tx.tipoDocumento || 'Remisión'} {tx.nroReciboCaja ? `#${tx.nroReciboCaja}` : ''}
+                                </span>
+                                <span className="text-xs font-mono font-black text-emerald-400">
+                                  {formatCOP(tx.valor)}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center text-[9.5px] text-slate-300">
+                                <span>Asesor: <strong className="text-white">{tx.asesor || 'Sin Asesor'}</strong></span>
+                                <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                              </div>
+                              <p className="text-[9px] text-slate-400 truncate" title={tx.descripcion}>{tx.descripcion}</p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 

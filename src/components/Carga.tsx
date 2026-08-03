@@ -21,7 +21,8 @@ import {
   RefreshCw,
   X,
   Lock,
-  Check
+  Check,
+  Download
 } from 'lucide-react';
 
 
@@ -569,23 +570,40 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
 
                   return (
                     <tr key={batch.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4 font-bold text-slate-850 min-w-[220px] break-all">
-                        <div className="flex items-center gap-2">
-                          <FileSpreadsheet className="h-4.5 w-4.5 text-emerald-600 flex-shrink-0" />
-                          {batch.archivoUrl ? (
-                            <a 
-                              href={batch.archivoUrl} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="text-[#1A2D7C] hover:underline font-bold whitespace-normal inline-flex items-center gap-1 cursor-pointer"
-                              title="Descargar archivo original de Firebase Storage"
+                      <td className="p-4 font-bold text-slate-850 min-w-[240px] break-all">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <FileSpreadsheet className="h-4.5 w-4.5 text-emerald-600 flex-shrink-0" />
+                            {batch.archivoUrl ? (
+                              <a 
+                                href={batch.archivoUrl} 
+                                download
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                onDoubleClick={() => window.open(batch.archivoUrl, '_blank')}
+                                className="text-[#1A2D7C] hover:text-emerald-700 hover:underline font-bold whitespace-normal inline-flex items-center gap-1 cursor-pointer"
+                                title="Haz doble clic o clic para descargar inmediatamente"
+                              >
+                                {batch.nombreArchivo}
+                              </a>
+                            ) : (
+                              <span title={batch.nombreArchivo} className="whitespace-normal">
+                                {batch.nombreArchivo}
+                              </span>
+                            )}
+                          </div>
+                          {batch.archivoUrl && (
+                            <a
+                              href={batch.archivoUrl}
+                              download
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[9.5px] tracking-wider py-1.5 px-2.5 rounded-lg inline-flex items-center gap-1.5 shadow-sm transition-all flex-shrink-0"
+                              title="Descargar archivo Excel original"
                             >
-                              {batch.nombreArchivo}
+                              <Download className="h-3.5 w-3.5" />
+                              <span>Descargar</span>
                             </a>
-                          ) : (
-                            <span title={batch.nombreArchivo} className="whitespace-normal">
-                              {batch.nombreArchivo}
-                            </span>
                           )}
                         </div>
                       </td>
