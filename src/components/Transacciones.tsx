@@ -238,7 +238,6 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   );
   const identifiedPaymentsForDate = transactions.filter(
     t => t.identificada &&
-         t.tipoDocumento !== 'Ignorado' &&
          t.sede === cierreSede &&
          !t.esHistorico &&
          ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
@@ -367,7 +366,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
               PENDIENTES {sedeFilter !== 'Todas' ? `• ${sedeFilter.toUpperCase()}` : ''}
             </p>
             <p id="stat-pending-count" className="text-xl font-black text-[#F47920] font-space mt-1 leading-none">
-              {baseFilteredTransactions.filter(t => !t.identificada && t.tipoDocumento !== 'Ignorado').length.toString().padStart(2, '0')}
+              {baseFilteredTransactions.filter(t => !t.identificada).length.toString().padStart(2, '0')}
             </p>
           </div>
           <div className="bg-[#1A2D7C] text-white px-4 py-2.5 rounded-2xl text-right min-w-[180px] shadow-lg">
@@ -376,10 +375,10 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
             </p>
             <div className="flex items-baseline justify-end gap-2 mt-1">
               <p id="stat-solved-count" className="text-xl font-black text-white font-space leading-none">
-                {baseFilteredTransactions.filter(t => t.identificada && t.tipoDocumento !== 'Ignorado').length.toString().padStart(2, '0')} <span className="text-xs font-normal opacity-80">txs</span>
+                {baseFilteredTransactions.filter(t => t.identificada).length.toString().padStart(2, '0')} <span className="text-xs font-normal opacity-80">txs</span>
               </p>
               <span className="text-xs font-mono font-bold text-emerald-300">
-                {formatCOP(baseFilteredTransactions.filter(t => t.identificada && t.tipoDocumento !== 'Ignorado').reduce((sum, t) => sum + t.valor, 0))}
+                {formatCOP(baseFilteredTransactions.filter(t => t.identificada).reduce((sum, t) => sum + t.valor, 0))}
               </span>
             </div>
           </div>

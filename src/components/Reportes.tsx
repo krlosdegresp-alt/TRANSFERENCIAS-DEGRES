@@ -245,7 +245,6 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
   // 2. Total Identified (Conciliado) for selected closure date & branch (por fecha de IDENTIFICACIÓN)
   const identifiedTxsCierre = transactions.filter(
     t => t.identificada &&
-         t.tipoDocumento !== 'Ignorado' &&
          t.sede === cierreSede &&
          !t.esHistorico &&
          ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
@@ -257,7 +256,7 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
 
   // 4. Number of pending transactions
   const numPendientesCierre = transactions.filter(
-    t => t.fecha === cierreFecha && t.sede === cierreSede && !t.identificada && !t.esHistorico && t.tipoDocumento !== 'Ignorado'
+    t => t.fecha === cierreFecha && t.sede === cierreSede && !t.identificada && !t.esHistorico
   ).length;
 
   // The difference/descuadre is totalIdentificadoCierre - totalBancoCierre
