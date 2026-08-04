@@ -508,14 +508,17 @@ export async function uploadBankTransactions(
     if (currentKeysSet.has(tx.llaveUnica)) {
       duplicates++;
       const existingTx = current.find(t => t.llaveUnica === tx.llaveUnica);
-      if (tx.identificada && existingTx && !existingTx.identificada) {
-        const updatedTx = {
+      if (existingTx) {
+        const isNowIdentified = tx.identificada || existingTx.identificada;
+        const updatedTx: Transaction = {
           ...existingTx,
-          identificada: true,
-          fechaIdentificacion: tx.fechaIdentificacion || getColombiaDateTime().dateTimeStr,
-          usuarioIdentificacion: tx.usuarioIdentificacion || uploaderName,
-          asesor: tx.asesor || null,
-          tipoDocumento: tx.tipoDocumento || null
+          identificada: isNowIdentified,
+          esHistorico: false, // Restore / un-archive transaction on re-import
+          fechaIdentificacion: tx.fechaIdentificacion || existingTx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
+          usuarioIdentificacion: tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName,
+          asesor: tx.asesor || existingTx.asesor || null,
+          tipoDocumento: tx.tipoDocumento || existingTx.tipoDocumento || null,
+          justificacionIgnorado: tx.justificacionIgnorado || existingTx.justificacionIgnorado || null
         };
         toAdd.push(updatedTx);
         currentMap.set(updatedTx.id, updatedTx);
@@ -951,6 +954,47 @@ export function executeMonthlyCleanup(adminName: string): { totalArchived: numbe
   );
 
   return { totalArchived: updated.length };
+}
+
+export function restoreAllArchivedTransactions(adminName: string): { totalRestored: number } {
+  const current = getTransactions();
+  let count = 0;
+  const updated = current.map(tx => {
+    if (tx.esHistorico) {
+      count++;
+      return { ...tx, esHistorico: false };
+    }
+    return tx;
+  });
+
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(updated));
+  notifyListeners();
+
+  (async () => {
+    try {
+      const chunks = [];
+      for (let i = 0; i < updated.length; i += 500) {
+        chunks.push(updated.slice(i, i + 500));
+      }
+      for (const chunk of chunks) {
+        const bWrite = writeBatch(db);
+        chunk.forEach(tx => {
+          bWrite.set(doc(db, 'transactions', tx.id), tx);
+        });
+        await bWrite.commit();
+      }
+    } catch (e) {
+      console.error("Error in restoreAllArchivedTransactions write:", e);
+    }
+  })();
+
+  addAuditLog(
+    adminName,
+    'Restauración de Datos',
+    `Restauró/desarchivó ${count} transacciones históricas a estado activo.`
+  );
+
+  return { totalRestored: count };
 }
 
 // ----------------------------------------------------

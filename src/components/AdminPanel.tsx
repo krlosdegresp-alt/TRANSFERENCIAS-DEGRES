@@ -3,6 +3,7 @@ import {
   getTransactions, 
   revertIdentification, 
   executeMonthlyCleanup, 
+  restoreAllArchivedTransactions,
   getAuditLogs, 
   getUsers,
   createUserInFirestore,
@@ -41,6 +42,7 @@ import {
   Lock,
   Unlock,
   XCircle,
+  RotateCcw,
   FileSpreadsheet
 } from 'lucide-react';
 
@@ -437,6 +439,87 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
   };
 
   // Monthly archive: downloads CSV and marks everything as historic
+  const generateBackupWorkbook = () => {
+    const formattedData = transactions.map(tx => ({
+      'Llave Unica': tx.llaveUnica,
+      'Fecha': tx.fecha,
+      'Hora': tx.hora || '',
+      'Descripcion': tx.descripcion,
+      'Valor COP': tx.valor,
+      'Banco Cuenta': tx.cuenta,
+      'Sede Fisica': tx.sede,
+      'Identificada (S/N)': tx.identificada ? 'S' : 'N',
+      'Asesor Responsable': tx.asesor || 'Ninguno',
+      'Tipo Documento': tx.tipoDocumento || 'Ninguno',
+      'Auxiliar Identificacion': tx.usuarioIdentificacion || 'Ninguno',
+      'Fecha Validacion': tx.fechaIdentificacion || 'Ninguno',
+      'Es Historico (S/N)': tx.esHistorico ? 'S' : 'N'
+    }));
+
+    const formattedCierres = cierresCajaList.map(c => ({
+      'Sede Física': c.sede,
+      'Fecha Cierre': c.fecha,
+      'Nombre Cajera': c.nombreCajera,
+      'Transacciones Identificadas (N°)': c.numeroIdentificados,
+      'Total Identificado ($)': c.totalIdentificado,
+      'Total Aplicativo ($)': c.totalAplicativo,
+      'Coincide Conciliación': c.coincide ? 'SÍ' : 'NO',
+      'Motivo Descuadre': c.motivoDiferencia || 'Ninguno'
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(formattedData);
+    const worksheetCierres = XLSX.utils.json_to_sheet(formattedCierres);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Historico_Transferencias');
+    XLSX.utils.book_append_sheet(workbook, worksheetCierres, 'Cierres_de_Caja_Conciliados');
+
+    worksheet['!cols'] = [
+      { wch: 45 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 14 },
+      { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 15 },
+      { wch: 25 }, { wch: 20 }, { wch: 16 }
+    ];
+
+    return workbook;
+  };
+
+  const handleDownloadBackupOnly = () => {
+    if (transactions.length === 0 && cierresCajaList.length === 0) {
+      triggerAlert('Sin Datos', 'No hay datos acumulados para exportar copia de seguridad.', 'info');
+      return;
+    }
+    try {
+      const workbook = generateBackupWorkbook();
+      const dateStr = getColombiaDateTime().dateStr;
+      XLSX.writeFile(workbook, `Respaldo_Completo_Transferencias_Cierres_${dateStr}.xlsx`);
+      triggerAlert(
+        'Copia de Seguridad Generada',
+        'Se descargó el archivo Excel con todas las transacciones y cierres de caja. La base de datos no fue modificada.',
+        'success'
+      );
+    } catch (err) {
+      console.error('Error generating backup:', err);
+      triggerAlert('Error', 'Error al exportar la copia de seguridad.', 'error');
+    }
+  };
+
+  const handleRestoreArchived = () => {
+    triggerConfirm(
+      'Restaurar Transacciones Archivadas',
+      '¿Desea restaurar/desarchivar todas las transacciones históricas para que vuelvan a aparecer en los listados activos del día?',
+      () => {
+        const res = restoreAllArchivedTransactions(currentUser.nombre);
+        onRefreshData();
+        triggerAlert(
+          'Restauración Completada',
+          `¡Se han restaurado ${res.totalRestored} transacciones a la vista activa!`,
+          'success'
+        );
+      },
+      'info'
+    );
+  };
+
   const handleMonthlyArchive = () => {
     // 1. Double check there are payments in the database
     if (transactions.length === 0) {
@@ -446,49 +529,10 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
 
     triggerConfirm(
       'Limpieza y Cierre Mensual',
-      '¿Desea ejecutar la LIMPIEZA MENSUAL del sistema?\n\nEsto descargará un archivo excel histórico conteniendo todas las transacciones vigentes con sus llaves de seguridad, y luego las archivará para que no entren en conflicto con el mes entrante.',
+      '¿Desea ejecutar la LIMPIEZA MENSUAL del sistema?\n\nEsto descargará un archivo excel histórico con todas las transacciones y cierres de caja, y luego archivará las transacciones para que no entren en conflicto con el mes entrante.',
       () => {
         try {
-          // 2. Prepare spreadsheet format
-          const formattedData = transactions.map(tx => ({
-            'Llave Unica': tx.llaveUnica,
-            'Fecha': tx.fecha,
-            'Hora': tx.hora,
-            'Descripcion': tx.descripcion,
-            'Valor COP': tx.valor,
-            'Banco Cuenta': tx.cuenta,
-            'Sede Fisica': tx.sede,
-            'Identificada (S/N)': tx.identificada ? 'S' : 'N',
-            'Asesor Responsable': tx.asesor || 'Ninguno',
-            'Tipo Documento': tx.tipoDocumento || 'Ninguno',
-            'Auxiliar Identificacion': tx.usuarioIdentificacion || 'Ninguno',
-            'Fecha Validacion': tx.fechaIdentificacion || 'Ninguno',
-            'Es Historico (S/N)': tx.esHistorico ? 'S' : 'N'
-          }));
-
-          // Create sheet and workbook
-          const worksheet = XLSX.utils.json_to_sheet(formattedData);
-          const workbook = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(workbook, worksheet, 'Historico_Transferencias');
-
-          // Adjust column widths
-          worksheet['!cols'] = [
-            { wch: 45 }, // Llave
-            { wch: 12 }, // Fecha
-            { wch: 10 }, // Hora
-            { wch: 30 }, // Descripcion
-            { wch: 14 }, // Valor
-            { wch: 18 }, // Cuenta
-            { wch: 14 }, // Sede
-            { wch: 16 }, // Identificada
-            { wch: 20 }, // Asesor
-            { wch: 15 }, // Documento
-            { wch: 25 }, // Auxiliar
-            { wch: 20 }, // Fecha Validacion
-            { wch: 16 }  // Historico
-          ];
-
-          // Download file
+          const workbook = generateBackupWorkbook();
           const dateStr = getColombiaDateTime().dateStr;
           XLSX.writeFile(workbook, `Historico_Transferencias_Cierre_${dateStr}.xlsx`);
 
@@ -498,7 +542,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
 
           triggerAlert(
             'Limpieza Completada',
-            `¡Limpieza Mensual Completada!\n\nSe descargó el archivo 'Historico_Transferencias_Cierre_${dateStr}.xlsx' con ${res.totalArchived} registros y se limpiaron las sucursales para el nuevo período fiscal.`,
+            `¡Limpieza Mensual Completada!\n\nSe descargó el archivo 'Historico_Transferencias_Cierre_${dateStr}.xlsx' con ${res.totalArchived} registros y cierres de caja, y se archivaron las transacciones para el nuevo período fiscal.`,
             'success'
           );
 
@@ -1238,29 +1282,80 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
         <div className="space-y-6">
           <div id="subview-cleanup" className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm space-y-6">
             <div className="max-w-2xl">
-              <div className="flex items-center gap-2 text-amber-600 mb-2">
-                <AlertTriangle className="h-5 w-5" />
-                <h3 className="font-bold text-slate-900 text-base">Cierre y Limpieza del Mes</h3>
+              <div className="flex items-center gap-2 text-[#1A2D7C] mb-2">
+                <Download className="h-5 w-5 text-[#1A2D7C]" />
+                <h3 className="font-bold text-slate-900 text-base font-space uppercase">Resguardo de Información y Cierre de Mes</h3>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Cada mes fiscal, para evitar congestiones y que las cajeras vean listados interminables del mes anterior, se debe ejecutar un proceso de archivo histórico.
+                Puedes exportar una copia de seguridad en Excel en cualquier momento sin alterar el estado de las transacciones, o realizar el proceso de cierre y limpieza mensual para pasar las transacciones al archivo histórico.
               </p>
-              <p className="text-xs text-amber-700 leading-relaxed bg-amber-50 rounded-lg p-3 border border-amber-100">
-                <strong>¿Cómo funciona el resguardo?</strong> Antes de limpiar el mes y marcar las transacciones vigentes como archivadas/históricas, el sistema compilará y <strong>descargará automáticamente su base de datos completa como un archivo Excel editable (.xlsx)</strong> que contiene cada llave única. De esta forma, si se requiere conciliar reclamaciones futuras del mes clausurado, ese Excel se conserva como resguardo oficial y se puede re-utilizar sin duplicar movimientos actuales!
+              <p className="text-xs text-blue-900 leading-relaxed bg-blue-50/70 rounded-lg p-3 border border-blue-100 mb-4">
+                <strong>¿Cómo funciona el resguardo?</strong> El archivo Excel generado contiene 2 hojas completas: <strong>'Historico_Transferencias'</strong> con la información de cada abono/pago y sus llaves de seguridad, y <strong>'Cierres_de_Caja_Conciliados'</strong> con las declaraciones registradas de las cajeras. Si vuelves a cargar este archivo en la pestaña 'Carga de Archivos', las transacciones y cierres se restaurarán de forma transparente!
               </p>
             </div>
 
-            <div className="border-t border-slate-200 pt-6 flex flex-col sm:flex-row items-center gap-4">
-              <button
-                id="btn-trigger-cleanup"
-                onClick={handleMonthlyArchive}
-                className="w-full sm:w-auto bg-[#1A2D7C] hover:bg-[#1A2D7C]/95 text-white py-3 px-6 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md"
-              >
-                <Download className="h-4.5 w-4.5" />
-                Ejecutar Cierre y Exportar Histórico Excel
-              </button>
-              <div className="text-[10px] text-slate-400 font-semibold italic">
-                * Se generará un backup seguro e inalterable.
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-200 pt-6">
+              {/* Opción 1: Solo Copia de Seguridad */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-center gap-2 font-bold text-slate-800 text-xs mb-1">
+                    <Download className="h-4 w-4 text-[#1A2D7C]" />
+                    Copia de Seguridad
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-normal">
+                    Descarga el archivo Excel completo (transacciones y cierres) <strong>sin borrar ni archivar nada</strong>.
+                  </p>
+                </div>
+                <button
+                  id="btn-trigger-backup-only"
+                  onClick={handleDownloadBackupOnly}
+                  className="w-full bg-[#1A2D7C] hover:bg-[#1A2D7C]/90 text-white py-2.5 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                >
+                  <Download className="h-4 w-4" />
+                  Descargar Copia (Sin Limpiar)
+                </button>
+              </div>
+
+              {/* Opción 2: Cierre Mensual */}
+              <div className="bg-amber-50/60 p-4 rounded-xl border border-amber-200 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-center gap-2 font-bold text-amber-900 text-xs mb-1">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    Cierre y Limpieza Mensual
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-normal">
+                    Descarga el respaldo Excel y <strong>archiva las transacciones</strong> del mes para un nuevo periodo fiscal.
+                  </p>
+                </div>
+                <button
+                  id="btn-trigger-cleanup"
+                  onClick={handleMonthlyArchive}
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white py-2.5 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  Ejecutar Cierre y Limpieza
+                </button>
+              </div>
+
+              {/* Opción 3: Restaurar Archivadas */}
+              <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-center gap-2 font-bold text-emerald-900 text-xs mb-1">
+                    <RotateCcw className="h-4 w-4 text-emerald-600" />
+                    Restaurar Transacciones
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-normal">
+                    Si realizaste un cierre por error o estás en pruebas, haz clic para <strong>volver a activar todas las transacciones</strong>.
+                  </p>
+                </div>
+                <button
+                  id="btn-trigger-restore-archived"
+                  onClick={handleRestoreArchived}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Restaurar Transacciones
+                </button>
               </div>
             </div>
           </div>

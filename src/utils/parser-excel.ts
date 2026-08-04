@@ -310,7 +310,10 @@ export function parseExcelBankFile(
 
     for (let r = 0; r < Math.min(8, rawRows.length); r++) {
       const row = rawRows[r];
-      if (row && row.some(cell => String(cell || '').trim() === 'Llave Única')) {
+      if (row && row.some(cell => {
+        const str = String(cell || '').trim().toLowerCase();
+        return str.includes('llave unica') || str.includes('llave única') || str === 'llave';
+      })) {
         isExportedReport = true;
         reportHeaderIdx = r;
         break;
@@ -319,25 +322,43 @@ export function parseExcelBankFile(
 
     if (isExportedReport) {
       const headerRow = rawRows[reportHeaderIdx];
-      const llaveCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Llave Única');
-      const fechaCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Fecha');
-      const horaCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Hora');
-      const descCol = headerRow.findIndex((c: any) => String(c || '').trim() === 'Descripción');
-      const valorCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Valor'));
-      const cuentaCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Banco Cuenta'));
-      const sedeCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Sede'));
-      const estadoCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Estado'));
-      const asesorCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Asesor'));
-      const tipoDocCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Tipo'));
-      const auxiliarCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Auxiliar'));
-      const fechaValCol = headerRow.findIndex((c: any) => String(c || '').trim().startsWith('Fecha de'));
+      const llaveCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('llave'));
+      const fechaCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('fecha') && !str.includes('valida') && !str.includes('carga');
+      });
+      const horaCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('hora'));
+      const descCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('descripci'));
+      const valorCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('valor'));
+      const cuentaCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('cuenta') || str.includes('banco');
+      });
+      const sedeCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('sede'));
+      const estadoCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('estado') || str.includes('identifica') || str.includes('concilia');
+      });
+      const asesorCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('asesor'));
+      const tipoDocCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('tipo') || str.includes('documento');
+      });
+      const auxiliarCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('auxiliar') || str.includes('usuario');
+      });
+      const fechaValCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('fecha val') || str.includes('fecha de val') || str.includes('fecha de identificac') || str.includes('fecha identificac');
+      });
 
       for (let r = reportHeaderIdx + 1; r < rawRows.length; r++) {
         const row = rawRows[r];
         if (!row || row.length < 2) continue;
 
         const llave = String(row[llaveCol] || '').trim();
-        if (!llave || llave === 'Llave Única') continue;
+        if (!llave || llave.toLowerCase().includes('llave')) continue;
 
         let fechaStr = parseExcelDate(row[fechaCol]);
         let horaStr = String(row[horaCol] || '').trim();
@@ -353,7 +374,7 @@ export function parseExcelBankFile(
         const sede = (String(row[sedeCol] || '').trim() || fallbackSede) as Sede;
 
         const estadoStr = String(row[estadoCol] || '').trim().toUpperCase();
-        const identificada = estadoStr === 'CONCILIADO' || estadoStr === 'IDENTIFICADA';
+        const identificada = ['CONCILIADO', 'IDENTIFICADA', 'S', 'SI', 'SÍ', 'TRUE', '1'].includes(estadoStr);
 
         const asesorVal = String(row[asesorCol] || '').trim();
         const asesor = (asesorVal && asesorVal !== 'Ninguno') ? asesorVal : null;
