@@ -442,6 +442,9 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
   const generateBackupWorkbook = () => {
     const formattedData = transactions.map(tx => ({
       'Llave Unica': tx.llaveUnica,
+      'Comprobante / Referencia': tx.comprobante || 'Ninguno',
+      'N° Recibo Caja': tx.nroReciboCaja || 'Ninguno',
+      'Oficina': tx.oficina || 'Ninguno',
       'Fecha': tx.fecha,
       'Hora': tx.hora || '',
       'Descripcion': tx.descripcion,
@@ -475,9 +478,10 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     XLSX.utils.book_append_sheet(workbook, worksheetCierres, 'Cierres_de_Caja_Conciliados');
 
     worksheet['!cols'] = [
-      { wch: 45 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 14 },
-      { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 15 },
-      { wch: 25 }, { wch: 20 }, { wch: 16 }
+      { wch: 45 }, { wch: 22 }, { wch: 18 }, { wch: 16 }, { wch: 12 },
+      { wch: 10 }, { wch: 35 }, { wch: 14 }, { wch: 18 }, { wch: 14 },
+      { wch: 16 }, { wch: 20 }, { wch: 15 }, { wch: 25 }, { wch: 20 },
+      { wch: 16 }
     ];
 
     return workbook;

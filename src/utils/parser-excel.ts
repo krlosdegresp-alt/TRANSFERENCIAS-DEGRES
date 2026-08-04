@@ -339,6 +339,18 @@ export function parseExcelBankFile(
         const str = String(c || '').trim().toLowerCase();
         return str.includes('estado') || str.includes('identifica') || str.includes('concilia');
       });
+      const comprobanteCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('comprobante') || str.includes('referencia') || str.includes('ref');
+      });
+      const reciboCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('recibo') || str.includes('remisi');
+      });
+      const oficinaCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('oficina') || str.includes('sucursal');
+      });
       const asesorCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('asesor'));
       const tipoDocCol = headerRow.findIndex((c: any) => {
         const str = String(c || '').trim().toLowerCase();
@@ -376,6 +388,15 @@ export function parseExcelBankFile(
         const estadoStr = String(row[estadoCol] || '').trim().toUpperCase();
         const identificada = ['CONCILIADO', 'IDENTIFICADA', 'S', 'SI', 'SÍ', 'TRUE', '1'].includes(estadoStr);
 
+        const comprobanteVal = String(row[comprobanteCol] || '').trim();
+        const comprobante = (comprobanteVal && comprobanteVal !== 'Ninguno') ? comprobanteVal : undefined;
+
+        const reciboVal = String(row[reciboCol] || '').trim();
+        const nroReciboCaja = (reciboVal && reciboVal !== 'Ninguno') ? reciboVal : null;
+
+        const oficinaVal = String(row[oficinaCol] || '').trim();
+        const oficina = (oficinaVal && oficinaVal !== 'Ninguno') ? oficinaVal : undefined;
+
         const asesorVal = String(row[asesorCol] || '').trim();
         const asesor = (asesorVal && asesorVal !== 'Ninguno') ? asesorVal : null;
 
@@ -402,6 +423,9 @@ export function parseExcelBankFile(
           usuarioIdentificacion,
           asesor,
           tipoDocumento,
+          nroReciboCaja,
+          comprobante,
+          oficina,
           fechaCarga: currentTimestamp,
           esHistorico: false
         });

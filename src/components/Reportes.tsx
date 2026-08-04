@@ -503,6 +503,9 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
 
         return {
           'Llave Única': tx.llaveUnica,
+          'Comprobante / Referencia': tx.comprobante || 'Ninguno',
+          'N° Recibo Caja': tx.nroReciboCaja || 'Ninguno',
+          'Oficina / Sucursal': tx.oficina || 'Ninguno',
           'Fecha': tx.fecha,
           'Hora': tx.hora || 'No especificada',
           'Descripción': tx.descripcion,
