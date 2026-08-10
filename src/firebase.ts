@@ -563,8 +563,8 @@ export function saveUploadBatches(batches: UploadBatch[]) {
 // DEDUPLICATION ENGINE
 // ----------------------------------------------------
 export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): boolean {
-  // 1. Exact ID or LlaveUnica match
-  if (tx1.id === tx2.id || tx1.llaveUnica === tx2.llaveUnica) {
+  // 1. Exact ID or LlaveUnica match -> DEFINITELY DUPLICATE
+  if (tx1.id === tx2.id || (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica === tx2.llaveUnica)) {
     return true;
   }
 
@@ -581,15 +581,35 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
 
   if (!sameAccount) return false;
 
-  // 4. Non-empty Comprobante / Voucher match (e.g., #90516764)
+  // 4. Non-empty Comprobante / Voucher check
   const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  if (normComp1 && normComp2 && normComp1.length >= 3 && normComp1 === normComp2) {
-    return true; // 100% same payment voucher!
+  if (normComp1 && normComp2 && normComp1.length >= 2 && normComp2.length >= 2) {
+    if (normComp1 === normComp2) {
+      return true; // 100% same payment voucher!
+    } else {
+      return false; // DIFFERENT vouchers = DIFFERENT payments!
+    }
   }
 
-  // 5. Description & Date matching (or Day/Month inverted date matching)
+  // 5. Occurrence index or unique keys:
+  // If both transactions have distinct llaveUnica (e.g. occurrence index suffix _o1 vs _o0),
+  // they represent separate row entries in the bank statement!
+  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica !== tx2.llaveUnica) {
+    return false;
+  }
+
+  // 6. Time check (if both have non-empty time, e.g. "10:15:30" vs "10:28:10")
+  const normHora1 = (tx1.hora || '').trim().replace(/[:]/g, '');
+  const normHora2 = (tx2.hora || '').trim().replace(/[:]/g, '');
+  if (normHora1 && normHora2 && normHora1 !== '120000' && normHora2 !== '120000') {
+    if (normHora1 !== normHora2) {
+      return false; // Different times = DIFFERENT payments!
+    }
+  }
+
+  // 7. Description & Date matching (legacy fallback when llaveUnica is missing)
   const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -599,7 +619,9 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
   if (sameDesc) {
     // Exact date match
     if (tx1.fecha === tx2.fecha) {
-      return true;
+      if (!tx1.llaveUnica || !tx2.llaveUnica) {
+        return true;
+      }
     }
 
     // Day/Month inversion match (e.g. 2026-05-08 vs 2026-08-05)
