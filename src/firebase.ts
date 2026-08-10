@@ -355,10 +355,8 @@ export async function setMaintenanceMode(
     maintenanceMessage: customMessage || 'El aplicativo web se encuentra en proceso de mantenimiento y actualización por la Administración.'
   };
 
-  localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(updated));
-  notifyListeners();
-
   try {
+    // 1. Write to Firestore FIRST and await it so the remote database state is persisted
     await setDoc(doc(db, 'configs', 'system'), updated);
     addAuditLog(
       adminUser.nombre,
@@ -370,6 +368,10 @@ export async function setMaintenanceMode(
   } catch (error) {
     console.error('Error updating system config in Firestore:', error);
   }
+
+  // 2. Then update local cache and notify listeners
+  localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(updated));
+  notifyListeners();
 }
 
 // Ensure Carlos Ti and other predefined users are in Firestore if not already present

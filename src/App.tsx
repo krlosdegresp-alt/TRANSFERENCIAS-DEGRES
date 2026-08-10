@@ -33,6 +33,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('reportes'); // Defaults to reportes
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState<{ dateStr: string; dateTimeStr: string }>(getColombiaDateTime());
+  const [showAdminLoginOverride, setShowAdminLoginOverride] = useState(false);
   
   const prevMaintenanceModeRef = useRef<boolean>(getSystemConfig().maintenanceMode);
 
@@ -59,10 +60,14 @@ export default function App() {
 
       // Check if maintenance mode was deactivated (true -> false)
       if (prevMaintenanceModeRef.current === true && !freshConfig.maintenanceMode) {
-        console.log('Modo Mantenimiento desactivado. Ejecutando cierre de sesión y recarga de página para sincronizar la nueva versión.');
-        logoutUser();
-        window.location.reload();
-        return;
+        const activeUser = getCurrentUser();
+        // Only force logout/reload for logged-in non-Admin users (Cajeras, Tesoreras)
+        if (activeUser && activeUser.role !== 'Admin') {
+          console.log('Modo Mantenimiento desactivado para usuario general. Cerrando sesión y refrescando...');
+          logoutUser();
+          window.location.reload();
+          return;
+        }
       }
 
       prevMaintenanceModeRef.current = freshConfig.maintenanceMode;
@@ -111,7 +116,36 @@ export default function App() {
 
   // If maintenance mode is active and current user is NOT an Admin (or not logged in)
   if (systemConfig.maintenanceMode && (!currentUser || currentUser.role !== 'Admin')) {
-    return <PantallaMantenimiento systemConfig={systemConfig} />;
+    if (showAdminLoginOverride) {
+      return (
+        <div className="min-h-screen bg-[#0B132B] flex flex-col justify-center items-center p-4">
+          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+            <button 
+              onClick={() => setShowAdminLoginOverride(false)}
+              className="absolute top-4 right-4 text-xs font-bold text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg cursor-pointer transition-all"
+            >
+              ← Volver
+            </button>
+            <div className="text-center mb-2 mt-2">
+              <span className="text-[11px] font-black text-amber-800 uppercase tracking-widest bg-amber-50 border border-amber-200 px-3 py-1 rounded-full inline-block">
+                Acceso Exclusivo Administrador
+              </span>
+            </div>
+            <Login onLoginSuccess={(u) => {
+              setShowAdminLoginOverride(false);
+              handleLoginSuccess(u);
+            }} />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <PantallaMantenimiento 
+        systemConfig={systemConfig} 
+        onAdminLoginRequest={() => setShowAdminLoginOverride(true)}
+      />
+    );
   }
 
   // Render Login screen if not authenticated

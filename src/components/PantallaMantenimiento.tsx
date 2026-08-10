@@ -6,9 +6,10 @@ import { getColombiaDateTime, formatDateHuman, formatTime12h } from '../utils/fo
 
 interface PantallaMantenimientoProps {
   systemConfig: SystemConfig;
+  onAdminLoginRequest?: () => void;
 }
 
-export default function PantallaMantenimiento({ systemConfig }: PantallaMantenimientoProps) {
+export default function PantallaMantenimiento({ systemConfig, onAdminLoginRequest }: PantallaMantenimientoProps) {
   const now = getColombiaDateTime();
 
   const handleManualRefresh = () => {
@@ -59,7 +60,7 @@ export default function PantallaMantenimiento({ systemConfig }: PantallaMantenim
             <RefreshCw className="h-5 w-5 text-sky-400 flex-shrink-0 mt-0.5 animate-spin" style={{ animationDuration: '4s' }} />
             <div className="text-xs text-slate-300">
               <strong className="text-white block font-bold mb-0.5">Actualización e inicio automático</strong>
-              Tan pronto el administrador desactive el modo mantenimiento, esta pantalla te cerrará la sesión y <span className="text-sky-300 font-bold">refrescará la página automáticamente</span> para cargar la nueva versión.
+              Tan pronto el administrador desactive el modo mantenimiento, esta pantalla detectará la señal y <span className="text-sky-300 font-bold">cargará la nueva versión automáticamente</span>.
             </div>
           </div>
         </div>
@@ -78,17 +79,30 @@ export default function PantallaMantenimiento({ systemConfig }: PantallaMantenim
           </div>
         )}
 
-        {/* Manual Refresh Button */}
-        <button
-          id="btn-manual-refresh-maintenance"
-          onClick={handleManualRefresh}
-          className="bg-[#F47920] hover:bg-[#d9640f] text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-lg hover:shadow-orange-500/25 flex items-center gap-2 cursor-pointer transform active:scale-95"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Comprobar / Refrescar Página
-        </button>
+        {/* Action Buttons */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
+          <button
+            id="btn-manual-refresh-maintenance"
+            onClick={handleManualRefresh}
+            className="w-full sm:w-auto bg-[#F47920] hover:bg-[#d9640f] text-white px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-lg hover:shadow-orange-500/25 flex items-center justify-center gap-2 cursor-pointer transform active:scale-95"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Comprobar / Refrescar
+          </button>
 
-        <p className="text-[10px] text-slate-400 mt-4">
+          {onAdminLoginRequest && (
+            <button
+              id="btn-[#admin-login-maintenance]"
+              onClick={onAdminLoginRequest}
+              className="w-full sm:w-auto bg-white/15 hover:bg-white/25 border border-white/20 text-white px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ShieldAlert className="h-4 w-4 text-amber-300" />
+              Acceso Administrador
+            </button>
+          )}
+        </div>
+
+        <p className="text-[10px] text-slate-400 mt-5">
           Transferencias S.A.S. • Control de Recaudos y Conciliación QR
         </p>
       </div>
