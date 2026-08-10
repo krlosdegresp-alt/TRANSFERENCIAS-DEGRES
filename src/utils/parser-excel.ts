@@ -109,28 +109,44 @@ function parseExcelDate(val: any): string {
   // Extract the date part from any combined string (e.g. "19/06/2026 14:35:00" -> "19/06/2026")
   const dateStrPart = str.split(/[\sT]+/)[0];
 
-  // Try matches for format DD/MM/YYYY or DD/MM/YY
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  const matchYearFirst = dateStrPart.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (matchYearFirst) {
+    const year = matchYearFirst[1];
+    const month = matchYearFirst[2].padStart(2, '0');
+    const day = matchYearFirst[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // Match DD/MM/YYYY or MM/DD/YYYY
   const matchSlash = dateStrPart.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
   if (matchSlash) {
-    const day = matchSlash[1].padStart(2, '0');
-    const month = matchSlash[2].padStart(2, '0');
+    let p1 = parseInt(matchSlash[1], 10);
+    let p2 = parseInt(matchSlash[2], 10);
     let year = matchSlash[3];
     if (year.length === 2) {
       year = '20' + year; // Convert 26 to 2026
     }
-    return `${year}-${month}-${day}`;
-  }
 
-  // Try matches for format YYYY/MM/DD or YY/MM/DD
-  const matchYearFirst = dateStrPart.match(/^(\d{2,4})[/-](\d{1,2})[/-](\d{1,2})$/);
-  if (matchYearFirst) {
-    let year = matchYearFirst[1];
-    if (year.length === 2) {
-      year = '20' + year;
+    // Smart Colombian/Latin Date Parsing (DD/MM/YYYY):
+    // In Colombia, DD/MM/YYYY is standard.
+    // If p1 > 12, p1 MUST be the day, p2 MUST be the month (e.g. 29/07/2026 -> 2026-07-29).
+    // If p2 > 12, p2 MUST be the day, p1 MUST be the month (e.g. 05/29/2026 -> 2026-05-29).
+    // If both <= 12 (e.g. 08/05/2026), default to DD/MM/YYYY (Day=08, Month=05 -> 2026-05-08).
+    let day: number, month: number;
+    if (p1 > 12 && p2 <= 12) {
+      day = p1;
+      month = p2;
+    } else if (p2 > 12 && p1 <= 12) {
+      day = p2;
+      month = p1;
+    } else {
+      // Standard DD/MM/YYYY in Colombia
+      day = p1;
+      month = p2;
     }
-    const month = matchYearFirst[2].padStart(2, '0');
-    const day = matchYearFirst[3].padStart(2, '0');
-    return `${year}-${month}-${day}`;
+
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
   // Fallback to today if unparseable

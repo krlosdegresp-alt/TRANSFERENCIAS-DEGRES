@@ -115,4 +115,11 @@ export interface ReportConfig {
   showFiltrosConsulta: boolean;
 }
 
+export interface SystemConfig {
+  maintenanceMode: boolean;
+  maintenanceMessage?: string;
+  activatedBy?: string;
+  activatedAt?: string;
+}
+
 

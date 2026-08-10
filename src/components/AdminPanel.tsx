@@ -4,6 +4,7 @@ import {
   revertIdentification, 
   executeMonthlyCleanup, 
   restoreAllArchivedTransactions,
+  purgeDuplicateTransactionsFromDatabase,
   getAuditLogs, 
   getUsers,
   createUserInFirestore,
@@ -15,7 +16,9 @@ import {
   getCierresCaja,
   aprobarDesbloqueoCierre,
   rechazarDesbloqueoCierre,
-  registrarCierreCaja
+  registrarCierreCaja,
+  getSystemConfig,
+  setMaintenanceMode
 } from '../firebase';
 import { formatCOP, formatDateHuman, getColombiaDateTime } from '../utils/formato';
 import { Transaction, User, Role, Sede, AuditLog, CierreCaja } from '../types';
@@ -43,7 +46,10 @@ import {
   Unlock,
   XCircle,
   RotateCcw,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Wrench,
+  Power,
+  AlertOctagon
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -507,6 +513,52 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     }
   };
 
+  const [sysConfig, setSysConfig] = useState(getSystemConfig());
+
+  useEffect(() => {
+    const unsub = subscribeToDatabase(() => {
+      setSysConfig(getSystemConfig());
+    });
+    return () => unsub();
+  }, []);
+
+  const handleToggleMaintenanceMode = async () => {
+    const isCurrentlyActive = sysConfig.maintenanceMode;
+    const nextStatus = !isCurrentlyActive;
+
+    if (nextStatus) {
+      triggerConfirm(
+        'Activar Modo Mantenimiento / Actualizaciones',
+        '¿Deseas ACTIVAR el Modo Mantenimiento en el aplicativo web?\n\n• Mientras esté activo, solo los Administradores podrán ingresar.\n• A las cajeras, tesoreras y asesores se les mostrará una pantalla completa indicando que estamos en actualizaciones.',
+        async () => {
+          await setMaintenanceMode(true, currentUser);
+          setSysConfig(getSystemConfig());
+          triggerAlert(
+            'Modo Mantenimiento Activado',
+            'El modo mantenimiento ha sido activado exitosamente. Las demás cuentas verán la pantalla de actualización.',
+            'success'
+          );
+        },
+        'info'
+      );
+    } else {
+      triggerConfirm(
+        'Desactivar Modo Mantenimiento',
+        '¿Deseas DESACTIVAR el Modo Mantenimiento?\n\n• El sistema cerrará la sesión de los usuarios en la pantalla de actualización y REFRESCARÁ la página automáticamente en sus navegadores.\n• Todos los usuarios podrán ingresar normalmente con la nueva versión cargada.',
+        async () => {
+          await setMaintenanceMode(false, currentUser);
+          setSysConfig(getSystemConfig());
+          triggerAlert(
+            'Modo Mantenimiento Desactivado',
+            'Se desactivó el modo mantenimiento. Se envió la señal de cierre de sesión y recarga de página a los demás usuarios.',
+            'success'
+          );
+        },
+        'info'
+      );
+    }
+  };
+
   const handleRestoreArchived = () => {
     triggerConfirm(
       'Restaurar Transacciones Archivadas',
@@ -522,6 +574,29 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       },
       'info'
     );
+  };
+
+  const handlePurgeDuplicates = async () => {
+    try {
+      const res = await purgeDuplicateTransactionsFromDatabase(currentUser.nombre);
+      onRefreshData();
+      if (res.totalPurged > 0) {
+        triggerAlert(
+          'Depuración Completada',
+          `¡Se detectaron y fusionaron ${res.totalPurged} transacciones duplicadas de forma exitosa! La base de datos ha sido optimizada.`,
+          'success'
+        );
+      } else {
+        triggerAlert(
+          'Base de Datos Sin Duplicados',
+          'No se encontraron transacciones duplicadas. La base de datos ya está completamente limpia.',
+          'info'
+        );
+      }
+    } catch (err: any) {
+      console.error('Error al depurar duplicados:', err);
+      triggerAlert('Error', 'Ocurrió un error al depurar las transacciones duplicadas.', 'error');
+    }
   };
 
   const handleMonthlyArchive = () => {
@@ -1288,17 +1363,68 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
             <div className="max-w-2xl">
               <div className="flex items-center gap-2 text-[#1A2D7C] mb-2">
                 <Download className="h-5 w-5 text-[#1A2D7C]" />
-                <h3 className="font-bold text-slate-900 text-base font-space uppercase">Resguardo de Información y Cierre de Mes</h3>
+                <h3 className="font-bold text-slate-900 text-base font-space uppercase">Resguardo de Información, Mantenimiento y Cierre</h3>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Puedes exportar una copia de seguridad en Excel en cualquier momento sin alterar el estado de las transacciones, o realizar el proceso de cierre y limpieza mensual para pasar las transacciones al archivo histórico.
+                Puedes exportar una copia de seguridad en Excel en cualquier momento sin alterar el estado de las transacciones, controlar el modo mantenimiento para actualizaciones o realizar el proceso de cierre y limpieza mensual.
               </p>
               <p className="text-xs text-blue-900 leading-relaxed bg-blue-50/70 rounded-lg p-3 border border-blue-100 mb-4">
                 <strong>¿Cómo funciona el resguardo?</strong> El archivo Excel generado contiene 2 hojas completas: <strong>'Historico_Transferencias'</strong> con la información de cada abono/pago y sus llaves de seguridad, y <strong>'Cierres_de_Caja_Conciliados'</strong> con las declaraciones registradas de las cajeras. Si vuelves a cargar este archivo en la pestaña 'Carga de Archivos', las transacciones y cierres se restaurarán de forma transparente!
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-200 pt-6">
+            {/* CONTROL DE MANTENIMIENTO Y ACTUALIZACIONES DEL SISTEMA */}
+            <div className={`p-5 rounded-2xl border transition-all ${
+              sysConfig.maintenanceMode 
+                ? 'bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-purple-500/10 border-rose-300 shadow-md' 
+                : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className={`p-3 rounded-xl ${sysConfig.maintenanceMode ? 'bg-rose-600 text-white animate-pulse' : 'bg-slate-200 text-slate-700'}`}>
+                    <Wrench className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-bold text-slate-900 text-sm font-space uppercase">
+                        Modo Mantenimiento y Actualizaciones del Aplicativo
+                      </h4>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                        sysConfig.maintenanceMode ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      }`}>
+                        {sysConfig.maintenanceMode ? '🔴 MANTENIMIENTO ACTIVO' : '🟢 SISTEMA OPERATIVO NORMAL'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                      {sysConfig.maintenanceMode ? (
+                        <span className="text-rose-900 font-medium">
+                          Solo el personal <strong>Administrador</strong> tiene acceso al sistema. Las demás cuentas (cajeras, tesoreras, asesores) ven la pantalla de actualización. Al desactivar el mantenimiento, sus sesiones se cerrarán y sus navegadores se recargarán automáticamente.
+                        </span>
+                      ) : (
+                        <span>
+                          Activa este modo antes de publicar cambios o realizar mantenimiento. Mientras esté activo, solo los Administradores podrán ingresar y las demás cuentas verán la pantalla de actualización. Al desactivarlo, el sistema refrescará automáticamente sus navegadores.
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  id="btn-toggle-maintenance-mode"
+                  onClick={handleToggleMaintenanceMode}
+                  className={`px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-md text-white flex-shrink-0 ${
+                    sysConfig.maintenanceMode 
+                      ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-200' 
+                      : 'bg-[#F47920] hover:bg-[#d9640f] shadow-orange-200'
+                  }`}
+                >
+                  <Power className="h-4 w-4" />
+                  {sysConfig.maintenanceMode ? 'Desactivar Mantenimiento' : 'Activar Modo Mantenimiento'}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 border-t border-slate-200 pt-6">
               {/* Opción 1: Solo Copia de Seguridad */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
                 <div>
@@ -1320,7 +1446,28 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
                 </button>
               </div>
 
-              {/* Opción 2: Cierre Mensual */}
+              {/* Opción 2: Depurar Duplicados */}
+              <div className="bg-purple-50/60 p-4 rounded-xl border border-purple-200 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-center gap-2 font-bold text-purple-900 text-xs mb-1">
+                    <RefreshCw className="h-4 w-4 text-purple-600" />
+                    Depurar Duplicados
+                  </div>
+                  <p className="text-[11px] text-purple-800 leading-normal">
+                    Analiza la base de datos y <strong>fusiona automáticamente los pagos dobles</strong> (mismo comprobante, valor o fecha invertida).
+                  </p>
+                </div>
+                <button
+                  id="btn-trigger-purge-duplicates"
+                  onClick={handlePurgeDuplicates}
+                  className="w-full bg-purple-700 hover:bg-purple-800 text-white py-2.5 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Depurar Duplicados
+                </button>
+              </div>
+
+              {/* Opción 3: Cierre Mensual */}
               <div className="bg-amber-50/60 p-4 rounded-xl border border-amber-200 flex flex-col justify-between space-y-3">
                 <div>
                   <div className="flex items-center gap-2 font-bold text-amber-900 text-xs mb-1">
@@ -1337,11 +1484,11 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
                   className="w-full bg-amber-600 hover:bg-amber-700 text-white py-2.5 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                 >
                   <AlertTriangle className="h-4 w-4" />
-                  Ejecutar Cierre y Limpieza
+                  Ejecutar Cierre
                 </button>
               </div>
 
-              {/* Opción 3: Restaurar Archivadas */}
+              {/* Opción 4: Restaurar Archivadas */}
               <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200 flex flex-col justify-between space-y-3">
                 <div>
                   <div className="flex items-center gap-2 font-bold text-emerald-900 text-xs mb-1">

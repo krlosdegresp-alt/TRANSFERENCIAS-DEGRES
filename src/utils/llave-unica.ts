@@ -41,12 +41,15 @@ export function generarLlaveUnica(
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
-  // Suffix for occurrence index
-  const ocurSuffix = ocurr_idx !== undefined ? `_o${ocurr_idx}` : '';
+  // Suffix for occurrence index (only if index > 0)
+  const ocurSuffix = (ocurr_idx !== undefined && ocurr_idx > 0) ? `_o${ocurr_idx}` : '';
 
-  // If we have a stable comprobante numeric ID, append or use it to enforce extreme uniqueness
-  if (normComprobante && normComprobante.length > 2) {
-    return `tx_${normCuenta}_${normFecha}_${normHora}_v${normValor}_c${normComprobante}${ocurSuffix}`;
+  // If we have a stable bank comprobante numeric/alphanumeric ID (length >= 3),
+  // use Account + Value + Comprobante as the primary unique key.
+  // This guarantees that whether a bank extract lists posting date (e.g. 06 AGO) or
+  // transaction date (e.g. 29 JUL), or DD/MM vs MM/DD date variations, the key is 100% IDENTICAL.
+  if (normComprobante && normComprobante.length >= 3) {
+    return `tx_${normCuenta}_v${normValor}_c${normComprobante}${ocurSuffix}`;
   }
 
   return `tx_${normCuenta}_${normFecha}_${normHora}_v${normValor}_${normDesc}${ocurSuffix}`;

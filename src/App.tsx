@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { getCurrentUser, logoutUser, getTransactions, subscribeToDatabase, checkFirebaseStatus } from './firebase';
-import { User, Transaction } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { getCurrentUser, logoutUser, getTransactions, subscribeToDatabase, checkFirebaseStatus, getSystemConfig, setMaintenanceMode } from './firebase';
+import { User, Transaction, SystemConfig } from './types';
 import Login from './components/Login';
 import Navigation from './components/Navigation';
 import Carga from './components/Carga';
@@ -10,6 +10,7 @@ import AdminPanel from './components/AdminPanel';
 import Manuales from './components/Manuales';
 import ChatSoporte from './components/ChatSoporte';
 import GoogleMeetCalling from './components/GoogleMeetCalling';
+import PantallaMantenimiento from './components/PantallaMantenimiento';
 import { getColombiaDateTime, formatDateHuman, formatTime12h } from './utils/formato';
 import { 
   Building2, 
@@ -19,15 +20,21 @@ import {
   Database,
   Menu,
   X,
-  Clock
+  Clock,
+  Wrench,
+  AlertOctagon,
+  RefreshCw
 } from 'lucide-react';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(getCurrentUser());
   const [transactions, setTransactions] = useState<Transaction[]>(getTransactions());
+  const [systemConfig, setSystemConfig] = useState<SystemConfig>(getSystemConfig());
   const [activeTab, setActiveTab] = useState<string>('reportes'); // Defaults to reportes
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState<{ dateStr: string; dateTimeStr: string }>(getColombiaDateTime());
+  
+  const prevMaintenanceModeRef = useRef<boolean>(getSystemConfig().maintenanceMode);
 
   // Real-time ticking clock for general verification
   useEffect(() => {
@@ -41,10 +48,25 @@ export default function App() {
   useEffect(() => {
     // Sync initial state on load
     setTransactions(getTransactions());
+    const initialConfig = getSystemConfig();
+    setSystemConfig(initialConfig);
+    prevMaintenanceModeRef.current = initialConfig.maintenanceMode;
 
     // Subscribe to any updates (triggered on charge, validation, cleanup, or revert)
     const unsubscribe = subscribeToDatabase(() => {
       setTransactions(getTransactions());
+      const freshConfig = getSystemConfig();
+
+      // Check if maintenance mode was deactivated (true -> false)
+      if (prevMaintenanceModeRef.current === true && !freshConfig.maintenanceMode) {
+        console.log('Modo Mantenimiento desactivado. Ejecutando cierre de sesión y recarga de página para sincronizar la nueva versión.');
+        logoutUser();
+        window.location.reload();
+        return;
+      }
+
+      prevMaintenanceModeRef.current = freshConfig.maintenanceMode;
+      setSystemConfig(freshConfig);
     });
 
     return () => {
@@ -87,6 +109,11 @@ export default function App() {
     setTransactions(getTransactions());
   };
 
+  // If maintenance mode is active and current user is NOT an Admin (or not logged in)
+  if (systemConfig.maintenanceMode && (!currentUser || currentUser.role !== 'Admin')) {
+    return <PantallaMantenimiento systemConfig={systemConfig} />;
+  }
+
   // Render Login screen if not authenticated
   if (!currentUser) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
@@ -97,6 +124,30 @@ export default function App() {
 
   return (
     <div id="app-root-shell" className="min-h-screen lg:h-screen lg:overflow-hidden bg-slate-50 flex flex-col font-sans">
+      
+      {/* Admin Warning Banner if Maintenance Mode is active */}
+      {systemConfig.maintenanceMode && currentUser.role === 'Admin' && (
+        <div className="bg-gradient-to-r from-amber-600 via-rose-600 to-purple-700 text-white px-4 py-2 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs font-bold shadow-md z-50">
+          <div className="flex items-center gap-2">
+            <AlertOctagon className="h-4 w-4 text-amber-200 animate-bounce" />
+            <span>
+              🔴 MODO MANTENIMIENTO ACTIVO — El acceso para usuarios de sedes (Cajeras, Tesoreras, Asesores) está pausado.
+            </span>
+          </div>
+          <button
+            id="btn-admin-deactivate-maintenance-banner"
+            onClick={async () => {
+              if (window.confirm('¿Deseas desactivar el modo mantenimiento? Se cerrará la sesión de los usuarios que estén esperando y se refrescará la página para que ingresen normalmente.')) {
+                await setMaintenanceMode(false, currentUser);
+              }
+            }}
+            className="bg-white text-rose-900 hover:bg-rose-50 px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all shadow cursor-pointer flex items-center gap-1.5"
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-rose-600" />
+            Desactivar Mantenimiento
+          </button>
+        </div>
+      )}
       
       {/* Top Mobile Menu Header */}
       <header className="lg:hidden bg-[#1A2D7C] text-white p-4 flex items-center justify-between border-b border-white/10 sticky top-0 z-50">

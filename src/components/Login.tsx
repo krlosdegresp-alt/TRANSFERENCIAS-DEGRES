@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { loginUser, getUsers, saveUsers } from '../firebase';
+import { loginUser, getUsers, saveUsers, getSystemConfig } from '../firebase';
 import { User, Role, Sede } from '../types';
-import { Mail, Lock } from 'lucide-react';
+import { Mail, Lock, Wrench, ShieldAlert } from 'lucide-react';
 import DgDegresLogo from './DgDegresLogo';
 
 interface LoginProps {
@@ -12,6 +12,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+
+  const sysConfig = getSystemConfig();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +40,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
     if (matched.isBlocked) {
       setError('Acceso denegado. Este usuario ha sido deshabilitado/bloqueado por el administrador.');
+      return;
+    }
+
+    // Check Maintenance Mode restriction
+    const currentSysConfig = getSystemConfig();
+    if (currentSysConfig.maintenanceMode && matched.role !== 'Admin') {
+      setError('⛔ MODO MANTENIMIENTO ACTIVO. El aplicativo se encuentra en proceso de actualización por la Administración. Solamente el personal Administrador puede ingresar en este momento.');
       return;
     }
 
@@ -73,8 +82,18 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           </p>
         </div>
 
+        {sysConfig.maintenanceMode && (
+          <div className="w-full mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-semibold flex items-start gap-2 animate-pulse">
+            <Wrench className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <strong className="block text-amber-950 font-bold">Modo Actualizaciones Activo</strong>
+              Acceso temporal restringido solo a Administradores.
+            </div>
+          </div>
+        )}
+
         {error && (
-          <div className="w-full mb-5 p-3 bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs rounded font-medium">
+          <div className="w-full mb-5 p-3 bg-rose-50 border-l-4 border-rose-500 text-rose-700 text-xs rounded font-medium leading-relaxed">
             {error}
           </div>
         )}

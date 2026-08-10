@@ -13,7 +13,7 @@ import {
   deleteField 
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall, ReportConfig } from './types';
+import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall, ReportConfig, SystemConfig } from './types';
 import { getColombiaDateTime } from './utils/formato';
 
 // Firebase configuration from firebase-applet-config.json
@@ -55,6 +55,7 @@ const STORAGE_BATCHES_KEY = 'transf_upload_batches';
 const STORAGE_CHAT_KEY = 'transferencias_chat_messages';
 const STORAGE_VIDEOCALLS_KEY = 'transferencias_videocalls';
 const STORAGE_REPORT_CONFIG_KEY = 'transf_report_config';
+const STORAGE_SYSTEM_CONFIG_KEY = 'transf_system_config';
 
 // Initial mockup data for transactions so that the dashboard doesn't start completely blank if no data is in cloud
 const INITIAL_TRANSACTIONS: Transaction[] = [
@@ -208,14 +209,17 @@ export function initializeRealtimeListeners() {
       txList.push(docSnap.data() as Transaction);
     });
 
+    // Auto-deduplicate stored snapshot transactions
+    const { cleaned } = deduplicateTransactionList(txList);
+
     // Sort: latest dates first
-    txList.sort((a, b) => {
+    cleaned.sort((a, b) => {
       const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
       const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
       return dateTimeB.localeCompare(dateTimeA);
     });
 
-    localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(txList));
+    localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
     notifyListeners();
   });
 
@@ -300,10 +304,73 @@ export function initializeRealtimeListeners() {
     }
     notifyListeners();
   });
+
+  // 9. System config listener (Maintenance mode)
+  onSnapshot(doc(db, 'configs', 'system'), (docSnap) => {
+    if (docSnap.exists()) {
+      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(docSnap.data()));
+    } else {
+      const defaultConfig: SystemConfig = {
+        maintenanceMode: false,
+        maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
+      };
+      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(defaultConfig));
+    }
+    notifyListeners();
+  });
 }
 
 // Start listeners immediately on import
 initializeRealtimeListeners();
+
+export function getSystemConfig(): SystemConfig {
+  const data = localStorage.getItem(STORAGE_SYSTEM_CONFIG_KEY);
+  if (!data) {
+    return {
+      maintenanceMode: false,
+      maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
+    };
+  }
+  try {
+    return JSON.parse(data);
+  } catch (e) {
+    return {
+      maintenanceMode: false,
+      maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
+    };
+  }
+}
+
+export async function setMaintenanceMode(
+  active: boolean,
+  adminUser: User,
+  customMessage?: string
+): Promise<void> {
+  const current = getSystemConfig();
+  const updated: SystemConfig = {
+    ...current,
+    maintenanceMode: active,
+    activatedBy: active ? adminUser.nombre : undefined,
+    activatedAt: active ? getColombiaDateTime().dateTimeStr : undefined,
+    maintenanceMessage: customMessage || 'El aplicativo web se encuentra en proceso de mantenimiento y actualización por la Administración.'
+  };
+
+  localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(updated));
+  notifyListeners();
+
+  try {
+    await setDoc(doc(db, 'configs', 'system'), updated);
+    addAuditLog(
+      adminUser.nombre,
+      'Modo Mantenimiento',
+      active
+        ? `ACTIVÓ el Modo Mantenimiento / Actualizaciones. Acceso restringido solo a Admins.`
+        : `DESACTIVÓ el Modo Mantenimiento. Cierre de sesión y refresco automático enviado a los usuarios.`
+    );
+  } catch (error) {
+    console.error('Error updating system config in Firestore:', error);
+  }
+}
 
 // Ensure Carlos Ti and other predefined users are in Firestore if not already present
 async function ensurePredefinedUsersInFirestore() {
@@ -489,48 +556,156 @@ export function saveUploadBatches(batches: UploadBatch[]) {
   syncArrayToFirestore('batches', batches);
 }
 
+// ----------------------------------------------------
+// DEDUPLICATION ENGINE
+// ----------------------------------------------------
+export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): boolean {
+  // 1. Exact ID or LlaveUnica match
+  if (tx1.id === tx2.id || tx1.llaveUnica === tx2.llaveUnica) {
+    return true;
+  }
+
+  // 2. Value matching (within $0.01 COP tolerance)
+  const sameValor = Math.abs((tx1.valor || 0) - (tx2.valor || 0)) < 0.01;
+  if (!sameValor) return false;
+
+  // 3. Account / Sede matching
+  const normCta1 = (tx1.cuenta || '').replace(/\D/g, '').slice(-4);
+  const normCta2 = (tx2.cuenta || '').replace(/\D/g, '').slice(-4);
+  const sameAccount = (normCta1 && normCta2 && normCta1 === normCta2) ||
+                      (tx1.sede !== 'Desconocida' && tx1.sede === tx2.sede) ||
+                      (!normCta1 || !normCta2);
+
+  if (!sameAccount) return false;
+
+  // 4. Non-empty Comprobante / Voucher match (e.g., #90516764)
+  const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (normComp1 && normComp2 && normComp1.length >= 3 && normComp1 === normComp2) {
+    return true; // 100% same payment voucher!
+  }
+
+  // 5. Description & Date matching (or Day/Month inverted date matching)
+  const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const sameDesc = normDesc1.length > 3 && normDesc2.length > 3 && 
+                   (normDesc1 === normDesc2 || normDesc1.includes(normDesc2) || normDesc2.includes(normDesc1));
+
+  if (sameDesc) {
+    // Exact date match
+    if (tx1.fecha === tx2.fecha) {
+      return true;
+    }
+
+    // Day/Month inversion match (e.g. 2026-05-08 vs 2026-08-05)
+    if (tx1.fecha && tx2.fecha) {
+      const p1 = tx1.fecha.split('-');
+      const p2 = tx2.fecha.split('-');
+      if (p1.length === 3 && p2.length === 3) {
+        if (p1[0] === p2[0] && p1[1] === p2[2] && p1[2] === p2[1]) {
+          return true; // Day/Month swapped date defect!
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number } {
+  const result: Transaction[] = [];
+  let removedCount = 0;
+
+  for (const tx of txs) {
+    const existingIndex = result.findIndex(existing => isDuplicateTransaction(existing, tx));
+    if (existingIndex !== -1) {
+      removedCount++;
+      const existing = result[existingIndex];
+      // Merge: preserve identification, advisor, receipt number, oficina, and earliest/most complete details
+      const isNowIdentified = existing.identificada || tx.identificada;
+      const merged: Transaction = {
+        ...existing,
+        identificada: isNowIdentified,
+        esHistorico: existing.esHistorico && tx.esHistorico,
+        comprobante: existing.comprobante || tx.comprobante || undefined,
+        oficina: existing.oficina || tx.oficina || undefined,
+        nroReciboCaja: existing.nroReciboCaja || tx.nroReciboCaja || null,
+        fechaIdentificacion: existing.fechaIdentificacion || tx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
+        usuarioIdentificacion: existing.usuarioIdentificacion || tx.usuarioIdentificacion || null,
+        asesor: existing.asesor || tx.asesor || null,
+        tipoDocumento: existing.tipoDocumento || tx.tipoDocumento || null,
+        justificacionIgnorado: existing.justificacionIgnorado || tx.justificacionIgnorado || null
+      };
+      result[existingIndex] = merged;
+    } else {
+      result.push(tx);
+    }
+  }
+
+  return { cleaned: result, removedCount };
+}
+
+export async function purgeDuplicateTransactionsFromDatabase(adminName: string): Promise<{ totalPurged: number }> {
+  const current = getTransactions();
+  const { cleaned, removedCount } = deduplicateTransactionList(current);
+
+  if (removedCount > 0) {
+    saveTransactions(cleaned);
+    addAuditLog(
+      adminName,
+      'Depuración de Duplicados',
+      `Ejecutó depuración automática de duplicados. Se eliminaron/fusionaron ${removedCount} registros duplicados.`
+    );
+  }
+
+  return { totalPurged: removedCount };
+}
+
 export async function uploadBankTransactions(
   newTxs: Transaction[], 
   uploaderName: string, 
   fileName?: string,
   fileBlob?: File | null
 ): Promise<{ imported: number; duplicates: number }> {
+  // 1. Deduplicate incoming batch first
+  const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(newTxs);
+
   const current = getTransactions();
   const currentMap = new Map(current.map(tx => [tx.id, tx]));
-  const currentKeysSet = new Set(current.map(tx => tx.llaveUnica));
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   let imported = 0;
-  let duplicates = 0;
-  const toAdd: Transaction[] = [];
+  let duplicates = inBatchDupes;
 
-  newTxs.forEach(tx => {
-    if (currentKeysSet.has(tx.llaveUnica)) {
+  cleanedNewTxs.forEach(tx => {
+    // Search for existing duplicates in current database
+    const existingTx = Array.from(currentMap.values()).find(t => isDuplicateTransaction(t, tx));
+
+    if (existingTx) {
       duplicates++;
-      const existingTx = current.find(t => t.llaveUnica === tx.llaveUnica);
-      if (existingTx) {
-        const isNowIdentified = tx.identificada || existingTx.identificada;
-        const updatedTx: Transaction = {
-          ...existingTx,
-          identificada: isNowIdentified,
-          esHistorico: false, // Restore / un-archive transaction on re-import
-          fechaIdentificacion: tx.fechaIdentificacion || existingTx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
-          usuarioIdentificacion: tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName,
-          asesor: tx.asesor || existingTx.asesor || null,
-          tipoDocumento: tx.tipoDocumento || existingTx.tipoDocumento || null,
-          justificacionIgnorado: tx.justificacionIgnorado || existingTx.justificacionIgnorado || null
-        };
-        toAdd.push(updatedTx);
-        currentMap.set(updatedTx.id, updatedTx);
-      }
+      const isNowIdentified = tx.identificada || existingTx.identificada;
+      const updatedTx: Transaction = {
+        ...existingTx,
+        identificada: isNowIdentified,
+        esHistorico: false, // Restore / un-archive transaction on re-import
+        comprobante: tx.comprobante || existingTx.comprobante,
+        oficina: tx.oficina || existingTx.oficina,
+        nroReciboCaja: tx.nroReciboCaja || existingTx.nroReciboCaja,
+        fechaIdentificacion: tx.fechaIdentificacion || existingTx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
+        usuarioIdentificacion: tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName,
+        asesor: tx.asesor || existingTx.asesor || null,
+        tipoDocumento: tx.tipoDocumento || existingTx.tipoDocumento || null,
+        justificacionIgnorado: tx.justificacionIgnorado || existingTx.justificacionIgnorado || null
+      };
+      currentMap.set(existingTx.id, updatedTx);
     } else {
       const newTx = {
         ...tx,
         batchId
       };
-      toAdd.push(newTx);
       currentMap.set(newTx.id, newTx);
-      currentKeysSet.add(tx.llaveUnica);
       imported++;
     }
   });
@@ -584,10 +759,10 @@ export async function uploadBankTransactions(
     }
 
     // Save transactions to Firestore
-    if (toAdd.length > 0) {
+    if (updatedTxs.length > 0) {
       const chunks = [];
-      for (let i = 0; i < toAdd.length; i += 500) {
-        chunks.push(toAdd.slice(i, i + 500));
+      for (let i = 0; i < updatedTxs.length; i += 500) {
+        chunks.push(updatedTxs.slice(i, i + 500));
       }
       for (const chunk of chunks) {
         const bWrite = writeBatch(db);
