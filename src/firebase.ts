@@ -347,19 +347,24 @@ export async function setMaintenanceMode(
   customMessage?: string
 ): Promise<void> {
   const current = getSystemConfig();
+  
+  // Clean object without undefined values so Firestore setDoc does not throw
   const updated: SystemConfig = {
-    ...current,
     maintenanceMode: active,
-    activatedBy: active ? adminUser.nombre : undefined,
-    activatedAt: active ? getColombiaDateTime().dateTimeStr : undefined,
-    maintenanceMessage: customMessage || 'El aplicativo web se encuentra en proceso de mantenimiento y actualización por la Administración.'
+    maintenanceMessage: customMessage || 'El aplicativo web se encuentra en proceso de mantenimiento y actualización por la Administración.',
+    activatedBy: active ? (adminUser?.nombre || 'Administrador') : '',
+    activatedAt: active ? getColombiaDateTime().dateTimeStr : ''
   };
 
+  // Update local cache and notify listeners immediately for instant UI feedback
+  localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(updated));
+  notifyListeners();
+
   try {
-    // 1. Write to Firestore FIRST and await it so the remote database state is persisted
+    // Write to Firestore document
     await setDoc(doc(db, 'configs', 'system'), updated);
     addAuditLog(
-      adminUser.nombre,
+      adminUser?.nombre || 'Administrador',
       'Modo Mantenimiento',
       active
         ? `ACTIVÓ el Modo Mantenimiento / Actualizaciones. Acceso restringido solo a Admins.`
@@ -368,10 +373,6 @@ export async function setMaintenanceMode(
   } catch (error) {
     console.error('Error updating system config in Firestore:', error);
   }
-
-  // 2. Then update local cache and notify listeners
-  localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(updated));
-  notifyListeners();
 }
 
 // Ensure Carlos Ti and other predefined users are in Firestore if not already present
