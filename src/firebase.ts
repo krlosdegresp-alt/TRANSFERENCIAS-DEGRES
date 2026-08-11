@@ -308,13 +308,17 @@ export function initializeRealtimeListeners() {
   // 9. System config listener (Maintenance mode)
   onSnapshot(doc(db, 'configs', 'system'), (docSnap) => {
     if (docSnap.exists()) {
-      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(docSnap.data()));
+      const data = docSnap.data() as SystemConfig;
+      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(data));
     } else {
       const defaultConfig: SystemConfig = {
         maintenanceMode: false,
         maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
       };
       localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(defaultConfig));
+      setDoc(doc(db, 'configs', 'system'), defaultConfig).catch(err => {
+        console.error("Error seeding default system config:", err);
+      });
     }
     notifyListeners();
   });
