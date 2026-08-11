@@ -643,10 +643,15 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
         triggerConfirm(
           'Confirmación Final de Borrado',
           '¿Confirmas la eliminación de toda la información de la plataforma? Esta acción NO se puede deshacer.',
-          () => {
-            clearAllDatabase(currentUser.nombre);
-            onRefreshData();
-            triggerAlert('Base de Datos Borrada', 'Toda la información, cierres de caja y Exceles subidos han sido eliminados de la base de datos.', 'success');
+          async () => {
+            try {
+              await clearAllDatabase(currentUser.nombre);
+              onRefreshData();
+              triggerAlert('Base de Datos Borrada', 'Toda la información, cierres de caja y Exceles subidos han sido eliminados de la base de datos de forma permanente.', 'success');
+            } catch (e) {
+              console.error("Error durating database wipe:", e);
+              triggerAlert('Error', 'Ocurrió un problema al limpiar la base de datos.', 'error');
+            }
           },
           'danger'
         );

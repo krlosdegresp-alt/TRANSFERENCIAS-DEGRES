@@ -156,20 +156,6 @@ export function initializeRealtimeListeners() {
     }
   };
 
-  // 0. Global Wipe State listener (Syncs database wipe state across ALL connected devices in real time)
-  onSnapshot(doc(db, 'configs', 'wipeState'), (snap) => {
-    if (snap.exists()) {
-      const data = snap.data();
-      const wipeTime = Number(data?.wipeTime) || 0;
-      if (wipeTime > 0) {
-        localStorage.setItem(STORAGE_WIPE_TIME_KEY, String(wipeTime));
-      } else {
-        localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
-      }
-      notifyListeners();
-    }
-  }, handleListenerError('wipeState'));
-
   // 1. Users listener
   onSnapshot(collection(db, 'users'), (snapshot) => {
     let usersList: User[] = [];
@@ -183,19 +169,9 @@ export function initializeRealtimeListeners() {
 
   // 2. Transactions listener
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
-    const wipeTimeStr = localStorage.getItem(STORAGE_WIPE_TIME_KEY);
-    const wipeTime = wipeTimeStr ? Number(wipeTimeStr) : 0;
-
     let txList: Transaction[] = [];
     snapshot.forEach(docSnap => {
-      const data = docSnap.data() as Transaction;
-      if (wipeTime > 0) {
-        const docTime = parseTimestampMs(data.fechaCarga);
-        if (docTime <= wipeTime) {
-          return; // Skip document created before database wipe
-        }
-      }
-      txList.push(data);
+      txList.push(docSnap.data() as Transaction);
     });
 
     // Auto-deduplicate stored snapshot transactions
@@ -214,19 +190,9 @@ export function initializeRealtimeListeners() {
 
   // 3. Batches listener
   onSnapshot(collection(db, 'batches'), (snapshot) => {
-    const wipeTimeStr = localStorage.getItem(STORAGE_WIPE_TIME_KEY);
-    const wipeTime = wipeTimeStr ? Number(wipeTimeStr) : 0;
-
     const batchList: UploadBatch[] = [];
     snapshot.forEach(docSnap => {
-      const data = docSnap.data() as UploadBatch;
-      if (wipeTime > 0) {
-        const docTime = parseTimestampMs(data.fechaCarga);
-        if (docTime <= wipeTime) {
-          return; // Skip batch created before database wipe
-        }
-      }
-      batchList.push(data);
+      batchList.push(docSnap.data() as UploadBatch);
     });
 
     batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
@@ -237,19 +203,9 @@ export function initializeRealtimeListeners() {
 
   // 4. Cierres listener
   onSnapshot(collection(db, 'cierres'), (snapshot) => {
-    const wipeTimeStr = localStorage.getItem(STORAGE_WIPE_TIME_KEY);
-    const wipeTime = wipeTimeStr ? Number(wipeTimeStr) : 0;
-
     const cierresList: CierreCaja[] = [];
     snapshot.forEach(docSnap => {
-      const data = docSnap.data() as CierreCaja;
-      if (wipeTime > 0) {
-        const docTime = parseTimestampMs(data.fecha);
-        if (docTime <= wipeTime) {
-          return; // Skip closure created before database wipe
-        }
-      }
-      cierresList.push(data);
+      cierresList.push(docSnap.data() as CierreCaja);
     });
 
     localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierresList));
@@ -954,10 +910,15 @@ export function revertUploadBatch(batchId: string, adminName: string): boolean {
   // 2. Async storage and firestore cleanup
   (async () => {
     try {
-      // Delete transactions from Firestore
+      // Delete transactions from Firestore in batch chunks
       const txsToDelete = currentTxs.filter(tx => tx.batchId === batchId);
-      for (const tx of txsToDelete) {
-        await deleteDoc(doc(db, 'transactions', tx.id));
+      for (let i = 0; i < txsToDelete.length; i += 500) {
+        const chunk = txsToDelete.slice(i, i + 500);
+        const bWrite = writeBatch(db);
+        chunk.forEach(tx => {
+          bWrite.delete(doc(db, 'transactions', tx.id));
+        });
+        await bWrite.commit();
       }
 
       // Delete file from storage
@@ -1513,55 +1474,54 @@ export function rechazarDesbloqueoCierre(fecha: string, sede: Sede, adminUser: s
   return false;
 }
 
-export function clearAllDatabase(usuario: string) {
-  const wipeTime = Date.now();
-  localStorage.setItem(STORAGE_WIPE_TIME_KEY, String(wipeTime));
-
+export async function clearAllDatabase(usuario: string): Promise<void> {
+  // 1. Instantly clear local storage cache and notify listeners
   localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify([]));
   localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify([]));
   localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify([]));
+  localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify([]));
+  localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify([]));
+  localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+  localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
   notifyListeners();
 
-  (async () => {
+  // 2. Clear wipeState in Firestore if present
+  try {
+    await deleteDoc(doc(db, 'configs', 'wipeState')).catch(() => {});
+  } catch (e) {}
+
+  // 3. Delete ALL documents in all data collections from Firestore
+  const collectionsToClear = ['transactions', 'batches', 'cierres', 'logs', 'chat', 'videocalls'];
+  for (const colName of collectionsToClear) {
     try {
-      // Broadcast wipe to all connected devices via Firestore
-      await setDoc(doc(db, 'configs', 'wipeState'), {
-        wipeTime,
-        wipedBy: usuario,
-        timestamp: getColombiaDateTime().dateTimeStr
-      }).catch(e => console.warn("[WipeState Firestore Error]:", e));
-
-      const collectionsToClear = ['transactions', 'batches', 'cierres', 'logs', 'chat'];
-      for (const colName of collectionsToClear) {
-        try {
-          const colRef = collection(db, colName);
-          const snapshot = await getDocs(colRef);
-          const docs = snapshot.docs;
-          const chunks = [];
-          for (let i = 0; i < docs.length; i += 500) {
-            chunks.push(docs.slice(i, i + 500));
-          }
-          for (const chunk of chunks) {
-            const bWrite = writeBatch(db);
-            chunk.forEach(d => {
-              bWrite.delete(d.ref);
-            });
-            try {
-              await bWrite.commit();
-            } catch (err) {
-              console.warn(`[Wipe] Batch delete chunk notice for ${colName}:`, err);
-            }
-          }
-        } catch (colErr) {
-          console.warn(`[Wipe] Error fetching collection ${colName}:`, colErr);
-        }
+      const colRef = collection(db, colName);
+      const snapshot = await getDocs(colRef);
+      const docs = snapshot.docs;
+      
+      // Batch delete in chunks of 500
+      for (let i = 0; i < docs.length; i += 500) {
+        const chunk = docs.slice(i, i + 500);
+        const bWrite = writeBatch(db);
+        chunk.forEach(d => {
+          bWrite.delete(d.ref);
+        });
+        await bWrite.commit();
       }
-    } catch (e) {
-      console.warn("[Wipe] Firestore database cleanup finished with warnings:", e);
+    } catch (colErr) {
+      console.warn(`[Wipe] Error clearing collection ${colName}:`, colErr);
     }
-  })();
+  }
 
-  addAuditLog(usuario, 'Limpieza Total', 'Se borraron todas las transacciones, exceles subidos e historial de cierres de caja del sistema.');
+  // 4. Log the audit action
+  await addAuditLog(usuario, 'Limpieza Total', 'Se borraron todas las transacciones, exceles subidos e historial de cierres de caja del sistema.');
+
+  // 5. Final local cache wipe & listener notification
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify([]));
+  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify([]));
+  localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify([]));
+  localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify([]));
+  localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify([]));
+  notifyListeners();
 }
 
 export function getAdvisors(): string[] {
