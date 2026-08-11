@@ -473,7 +473,7 @@ export function parseExcelBankFile(
       }
     }
 
-    // Search for a table header row (rows 0..15)
+    // Search for a table header row (rows 0..35)
     let headerRowIdx = -1;
     let fechaColIdx = -1;
     let descColIdx = -1;
@@ -482,7 +482,7 @@ export function parseExcelBankFile(
     let valorColIdx = -1;
     let comprobanteColIdx = -1;
 
-    for (let r = 0; r < Math.min(15, rawRows.length); r++) {
+    for (let r = 0; r < Math.min(35, rawRows.length); r++) {
       const row = rawRows[r];
       if (!row || row.length < 2) continue;
 
@@ -497,17 +497,17 @@ export function parseExcelBankFile(
         const cellText = String(row[c] || '').toLowerCase().trim();
         if (!cellText) continue;
 
-        if (foundFecha === -1 && (cellText.includes('fecha') || cellText.includes('fec') || cellText === 'date')) {
+        if (foundFecha === -1 && (cellText.includes('fecha') || cellText.includes('fec') || cellText === 'date' || cellText.includes('dia') || cellText.includes('día'))) {
           foundFecha = c;
-        } else if (foundValor === -1 && (cellText.includes('valor') || cellText.includes('monto') || cellText.includes('importe') || cellText.includes('credito') || cellText.includes('crédito') || cellText.includes('ingreso') || cellText.includes('abono'))) {
+        } else if (foundValor === -1 && (cellText.includes('valor') || cellText.includes('monto') || cellText.includes('importe') || cellText.includes('credito') || cellText.includes('crédito') || cellText.includes('ingreso') || cellText.includes('abono') || cellText.includes('deposito') || cellText.includes('depósito') || cellText.includes('entrada') || cellText.includes('pago'))) {
           foundValor = c;
-        } else if (foundDesc === -1 && (cellText.includes('descripc') || cellText.includes('detalle') || cellText.includes('concepto') || cellText.includes('movimiento') || cellText === 'desc')) {
+        } else if (foundDesc === -1 && (cellText.includes('descripc') || cellText.includes('detalle') || cellText.includes('concepto') || cellText.includes('movimiento') || cellText === 'desc' || cellText.includes('leyenda') || cellText.includes('transaccion') || cellText.includes('transacción'))) {
           foundDesc = c;
-        } else if (foundOficina === -1 && (cellText.includes('oficina') || cellText.includes('sucursal') || cellText.includes('plaza'))) {
+        } else if (foundOficina === -1 && (cellText.includes('oficina') || cellText.includes('sucursal') || cellText.includes('plaza') || cellText.includes('canal'))) {
           foundOficina = c;
         } else if (foundCuenta === -1 && (cellText.includes('cuenta') || cellText.includes('cta') || cellText.includes('producto'))) {
           foundCuenta = c;
-        } else if (foundComprobante === -1 && (cellText.includes('comprobante') || cellText.includes('documento') || cellText.includes('doc') || cellText.includes('referencia') || cellText.includes('ref'))) {
+        } else if (foundComprobante === -1 && (cellText.includes('comprobante') || cellText.includes('documento') || cellText.includes('doc') || cellText.includes('referencia') || cellText.includes('ref') || cellText.includes('nro') || cellText.includes('num'))) {
           foundComprobante = c;
         }
       }
@@ -558,16 +558,32 @@ export function parseExcelBankFile(
         firstCellStr.includes('fecha') ||
         firstCellStr.includes('fec') ||
         firstCellStr.includes('total') ||
-        firstCellStr.includes('saldo')
+        firstCellStr.includes('saldo') ||
+        firstCellStr.includes('resumen')
       ) {
         continue;
       }
 
       // Parse Valor
-      const valRaw = row[valorColIdx];
-      if (valRaw === undefined || valRaw === null) continue;
+      let valRaw = row[valorColIdx];
+      let valor = parseColombianNumber(valRaw);
 
-      const valor = parseColombianNumber(valRaw);
+      // Fallback scan across all row cells if valor isn't found at guessed valorColIdx
+      if (isNaN(valor) || valor <= 0) {
+        for (let colIdx = 0; colIdx < row.length; colIdx++) {
+          if (colIdx === fechaColIdx) continue;
+          const candidateVal = parseColombianNumber(row[colIdx]);
+          if (!isNaN(candidateVal) && candidateVal > 0) {
+            const candStr = String(row[colIdx]).trim();
+            // Verify candidate is an actual currency amount and not a long document ID
+            if (candStr.length <= 13 && candidateVal < 1000000000) {
+              valor = candidateVal;
+              break;
+            }
+          }
+        }
+      }
+
       if (isNaN(valor) || valor <= 0) continue;
 
       // Parse Description

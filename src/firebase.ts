@@ -56,6 +56,7 @@ const STORAGE_CHAT_KEY = 'transferencias_chat_messages';
 const STORAGE_VIDEOCALLS_KEY = 'transferencias_videocalls';
 const STORAGE_REPORT_CONFIG_KEY = 'transf_report_config';
 const STORAGE_SYSTEM_CONFIG_KEY = 'transf_system_config';
+const STORAGE_WIPE_TIME_KEY = 'transf_db_wiped_timestamp';
 
 // Initial mockup data for transactions so that the dashboard doesn't start completely blank if no data is in cloud
 const INITIAL_TRANSACTIONS: Transaction[] = [
@@ -234,9 +235,22 @@ export function initializeRealtimeListeners() {
 
   // 2. Transactions listener
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
+    const wipeTimeStr = localStorage.getItem(STORAGE_WIPE_TIME_KEY);
+    const wipeTime = wipeTimeStr ? Number(wipeTimeStr) : 0;
+
     let txList: Transaction[] = [];
     snapshot.forEach(docSnap => {
-      txList.push(docSnap.data() as Transaction);
+      const data = docSnap.data() as Transaction;
+      if (wipeTime > 0) {
+        let docTime = 0;
+        if (data.fechaCarga) {
+          docTime = new Date(data.fechaCarga).getTime() || 0;
+        }
+        if (docTime > 0 && docTime < wipeTime) {
+          return; // Skip pre-wipe document
+        }
+      }
+      txList.push(data);
     });
 
     // Auto-deduplicate stored snapshot transactions
@@ -255,9 +269,22 @@ export function initializeRealtimeListeners() {
 
   // 3. Batches listener
   onSnapshot(collection(db, 'batches'), (snapshot) => {
+    const wipeTimeStr = localStorage.getItem(STORAGE_WIPE_TIME_KEY);
+    const wipeTime = wipeTimeStr ? Number(wipeTimeStr) : 0;
+
     const batchList: UploadBatch[] = [];
     snapshot.forEach(docSnap => {
-      batchList.push(docSnap.data() as UploadBatch);
+      const data = docSnap.data() as UploadBatch;
+      if (wipeTime > 0) {
+        let docTime = 0;
+        if (data.fechaCarga) {
+          docTime = new Date(data.fechaCarga).getTime() || 0;
+        }
+        if (docTime > 0 && docTime < wipeTime) {
+          return; // Skip pre-wipe batch
+        }
+      }
+      batchList.push(data);
     });
 
     batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
@@ -268,9 +295,22 @@ export function initializeRealtimeListeners() {
 
   // 4. Cierres listener
   onSnapshot(collection(db, 'cierres'), (snapshot) => {
+    const wipeTimeStr = localStorage.getItem(STORAGE_WIPE_TIME_KEY);
+    const wipeTime = wipeTimeStr ? Number(wipeTimeStr) : 0;
+
     const cierresList: CierreCaja[] = [];
     snapshot.forEach(docSnap => {
-      cierresList.push(docSnap.data() as CierreCaja);
+      const data = docSnap.data() as CierreCaja;
+      if (wipeTime > 0) {
+        let docTime = 0;
+        if (data.fecha) {
+          docTime = new Date(data.fecha).getTime() || 0;
+        }
+        if (docTime > 0 && docTime < wipeTime) {
+          return; // Skip pre-wipe closure
+        }
+      }
+      cierresList.push(data);
     });
 
     localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierresList));
@@ -628,7 +668,7 @@ export function logoutUser() {
 // ----------------------------------------------------
 export function getTransactions(): Transaction[] {
   const data = localStorage.getItem(STORAGE_TRANS_KEY);
-  if (!data) return INITIAL_TRANSACTIONS;
+  if (!data) return [];
   try {
     return JSON.parse(data) as Transaction[];
   } catch (e) {
@@ -814,6 +854,9 @@ export async function uploadBankTransactions(
   fileName?: string,
   fileBlob?: File | null
 ): Promise<{ imported: number; duplicates: number }> {
+  // Clear wipe timestamp marker when new active data is uploaded
+  localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
+
   // 1. Deduplicate incoming batch first
   const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(newTxs);
 
@@ -1395,6 +1438,7 @@ export function registrarCierreCaja(
   motivoDiferencia?: string | null,
   bloqueado: boolean = true
 ): CierreCaja {
+  localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
   const cierres = getCierresCaja();
   const id = `cierre_${sede}_${fecha}`;
   
@@ -1540,6 +1584,9 @@ export function rechazarDesbloqueoCierre(fecha: string, sede: Sede, adminUser: s
 }
 
 export function clearAllDatabase(usuario: string) {
+  const wipeTime = Date.now();
+  localStorage.setItem(STORAGE_WIPE_TIME_KEY, String(wipeTime));
+
   localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify([]));
   localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify([]));
   localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify([]));
@@ -1549,23 +1596,31 @@ export function clearAllDatabase(usuario: string) {
     try {
       const collectionsToClear = ['transactions', 'batches', 'cierres', 'logs', 'chat'];
       for (const colName of collectionsToClear) {
-        const colRef = collection(db, colName);
-        const snapshot = await getDocs(colRef);
-        const docs = snapshot.docs;
-        const chunks = [];
-        for (let i = 0; i < docs.length; i += 500) {
-          chunks.push(docs.slice(i, i + 500));
-        }
-        for (const chunk of chunks) {
-          const bWrite = writeBatch(db);
-          chunk.forEach(d => {
-            bWrite.delete(d.ref);
-          });
-          await bWrite.commit();
+        try {
+          const colRef = collection(db, colName);
+          const snapshot = await getDocs(colRef);
+          const docs = snapshot.docs;
+          const chunks = [];
+          for (let i = 0; i < docs.length; i += 500) {
+            chunks.push(docs.slice(i, i + 500));
+          }
+          for (const chunk of chunks) {
+            const bWrite = writeBatch(db);
+            chunk.forEach(d => {
+              bWrite.delete(d.ref);
+            });
+            try {
+              await bWrite.commit();
+            } catch (err) {
+              console.warn(`[Wipe] Batch delete chunk notice for ${colName}:`, err);
+            }
+          }
+        } catch (colErr) {
+          console.warn(`[Wipe] Error fetching collection ${colName}:`, colErr);
         }
       }
     } catch (e) {
-      console.error("Error wiping Firestore database:", e);
+      console.warn("[Wipe] Firestore database cleanup finished with warnings:", e);
     }
   })();
 
