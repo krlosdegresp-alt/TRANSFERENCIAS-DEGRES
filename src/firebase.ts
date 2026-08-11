@@ -335,51 +335,55 @@ export function initializeRealtimeListeners() {
     notifyListeners();
   }, handleListenerError('reports_config'));
 
-  // 9. System config listener (Maintenance mode)
+  // 9. System config listener (Maintenance mode - forced disabled per user request)
   onSnapshot(doc(db, 'configs', 'system'), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data() as SystemConfig;
-      const currentLocal = getSystemConfig();
-      
-      const localTime = currentLocal.updatedAt || 0;
-      const remoteTime = data.updatedAt || 0;
-
-      // Only accept remote update if it is newer or equal, or if local has no timestamp
-      if (remoteTime >= localTime) {
-        localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(data));
-        notifyListeners();
-      } else {
-        console.warn("[SystemConfig] Ignoring stale remote config from Firestore because local config is newer.");
-      }
+      // Force maintenanceMode to false so all users can log in and upload files
+      data.maintenanceMode = false;
+      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(data));
+      notifyListeners();
     } else {
-      const currentLocal = getSystemConfig();
-      if (!currentLocal.updatedAt) {
-        const defaultConfig: SystemConfig = {
-          maintenanceMode: false,
-          maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.',
-          updatedAt: Date.now()
-        };
-        localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(defaultConfig));
-        notifyListeners();
-      }
+      const defaultConfig: SystemConfig = {
+        maintenanceMode: false,
+        maintenanceMessage: 'El aplicativo web se encuentra operativo.',
+        updatedAt: Date.now()
+      };
+      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(defaultConfig));
+      notifyListeners();
     }
   }, handleListenerError('system_config'));
 }
 
 // Inter-tab / inter-window broadcast for system config changes
 if (typeof window !== 'undefined') {
+  // Clear any existing active maintenance mode on startup so everyone can access immediately
+  try {
+    const rawConfig = localStorage.getItem(STORAGE_SYSTEM_CONFIG_KEY);
+    if (rawConfig) {
+      const parsed = JSON.parse(rawConfig);
+      if (parsed.maintenanceMode) {
+        parsed.maintenanceMode = false;
+        parsed.updatedAt = Date.now();
+        localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(parsed));
+      }
+    } else {
+      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify({
+        maintenanceMode: false,
+        maintenanceMessage: 'El aplicativo web se encuentra operativo.',
+        updatedAt: Date.now()
+      }));
+    }
+  } catch (e) {}
+
   if (typeof BroadcastChannel !== 'undefined') {
     try {
       const bc = new BroadcastChannel('transf_system_config_bc');
       bc.onmessage = (event) => {
-        if (event.data && typeof event.data.maintenanceMode === 'boolean') {
-          const currentLocal = getSystemConfig();
-          const localTime = currentLocal.updatedAt || 0;
-          const bcTime = event.data.updatedAt || 0;
-          if (bcTime >= localTime) {
-            localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(event.data));
-            notifyListeners();
-          }
+        if (event.data) {
+          event.data.maintenanceMode = false;
+          localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(event.data));
+          notifyListeners();
         }
       };
     } catch (e) {
@@ -402,15 +406,17 @@ export function getSystemConfig(): SystemConfig {
   if (!data) {
     return {
       maintenanceMode: false,
-      maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
+      maintenanceMessage: 'El aplicativo web se encuentra operativo.'
     };
   }
   try {
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    parsed.maintenanceMode = false; // Always force disabled
+    return parsed;
   } catch (e) {
     return {
       maintenanceMode: false,
-      maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
+      maintenanceMessage: 'El aplicativo web se encuentra operativo.'
     };
   }
 }

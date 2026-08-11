@@ -114,40 +114,6 @@ export default function App() {
     setTransactions(getTransactions());
   };
 
-  // If maintenance mode is active and current user is NOT an Admin (or not logged in)
-  if (systemConfig.maintenanceMode && (!currentUser || currentUser.role !== 'Admin')) {
-    if (showAdminLoginOverride) {
-      return (
-        <div className="min-h-screen bg-[#0B132B] flex flex-col justify-center items-center p-4">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
-            <button 
-              onClick={() => setShowAdminLoginOverride(false)}
-              className="absolute top-4 right-4 text-xs font-bold text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg cursor-pointer transition-all"
-            >
-              ← Volver
-            </button>
-            <div className="text-center mb-2 mt-2">
-              <span className="text-[11px] font-black text-amber-800 uppercase tracking-widest bg-amber-50 border border-amber-200 px-3 py-1 rounded-full inline-block">
-                Acceso Exclusivo Administrador
-              </span>
-            </div>
-            <Login onLoginSuccess={(u) => {
-              setShowAdminLoginOverride(false);
-              handleLoginSuccess(u);
-            }} />
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <PantallaMantenimiento 
-        systemConfig={systemConfig} 
-        onAdminLoginRequest={() => setShowAdminLoginOverride(true)}
-      />
-    );
-  }
-
   // Render Login screen if not authenticated
   if (!currentUser) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
