@@ -156,6 +156,20 @@ export function initializeRealtimeListeners() {
     }
   };
 
+  // 0. Global Wipe State listener (Syncs database wipe state across ALL connected devices in real time)
+  onSnapshot(doc(db, 'configs', 'wipeState'), (snap) => {
+    if (snap.exists()) {
+      const data = snap.data();
+      const wipeTime = Number(data?.wipeTime) || 0;
+      if (wipeTime > 0) {
+        localStorage.setItem(STORAGE_WIPE_TIME_KEY, String(wipeTime));
+      } else {
+        localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
+      }
+      notifyListeners();
+    }
+  }, handleListenerError('wipeState'));
+
   // 1. Users listener
   onSnapshot(collection(db, 'users'), (snapshot) => {
     let usersList: User[] = [];
@@ -779,8 +793,9 @@ export async function uploadBankTransactions(
   fileName?: string,
   fileBlob?: File | null
 ): Promise<{ imported: number; duplicates: number }> {
-  // Clear wipe timestamp marker when new active data is uploaded
+  // Clear wipe timestamp marker globally in both local storage and Firestore
   localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
+  setDoc(doc(db, 'configs', 'wipeState'), { wipeTime: 0 }).catch(() => {});
 
   // 1. Deduplicate incoming batch first
   const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(newTxs);
@@ -835,16 +850,17 @@ export async function uploadBankTransactions(
     return dateTimeB.localeCompare(dateTimeA);
   });
 
-  // Optimistic immediate update to local storage & listeners
+  // Immediate local state update
   localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(updatedTxs));
 
   const finalFileName = fileName || 'archivo_movimientos.xlsx';
+  const nowStr = getColombiaDateTime().dateTimeStr;
 
   const batches = getUploadBatches();
   const newBatch: UploadBatch = {
     id: batchId,
     nombreArchivo: finalFileName,
-    fechaCarga: getColombiaDateTime().dateTimeStr,
+    fechaCarga: nowStr,
     usuario: uploaderName,
     totalLeidos: newTxs.length,
     totalImportados: imported,
@@ -856,84 +872,62 @@ export async function uploadBankTransactions(
 
   notifyListeners();
 
-  // 2. Persistent upload & db save in non-blocking background task (so UI completes instantly)
-  (async () => {
-    try {
-      let downloadUrl = '';
-      if (fileBlob) {
-        try {
-          const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Storage upload timeout (3s)')), 3000)
-          );
-          const snapshot = await Promise.race([
-            uploadBytes(storageRef, fileBlob),
-            timeoutPromise
-          ]) as any;
-          downloadUrl = await getDownloadURL(snapshot.ref);
-        } catch (stgErr) {
-          console.warn("Firebase Storage upload skipped or failed, proceeding with db save:", stgErr);
-        }
-      }
-
-      // Save ONLY modified/new transactions to Firestore in chunks of 500
-      if (changedTxs.length > 0) {
-        const chunks = [];
-        for (let i = 0; i < changedTxs.length; i += 500) {
-          chunks.push(changedTxs.slice(i, i + 500));
-        }
-        for (const chunk of chunks) {
-          const bWrite = writeBatch(db);
-          chunk.forEach(tx => {
-            const cleanTx: Record<string, any> = {};
-            for (const [key, value] of Object.entries(tx)) {
-              if (value !== undefined) {
-                cleanTx[key] = value;
-              }
-            }
-            bWrite.set(doc(db, 'transactions', tx.id), cleanTx);
-          });
-          try {
-            await Promise.race([
-              bWrite.commit(),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Batch write timeout')), 3000))
-            ]);
-          } catch (chunkErr) {
-            console.warn("[Firestore Chunk Write] Notice:", chunkErr);
-          }
-        }
-      }
-
-      // Save upload batch record with file URL
-      const persistentBatch: UploadBatch = {
-        ...newBatch,
-        archivoUrl: downloadUrl || undefined
-      };
-      
-      const cleanPersistentBatch: Record<string, any> = {};
-      for (const [key, value] of Object.entries(persistentBatch)) {
-        if (value !== undefined) {
-          cleanPersistentBatch[key] = value;
-        }
-      }
+  // 2. Direct Cloud Sync to Firestore
+  try {
+    let downloadUrl = '';
+    if (fileBlob) {
       try {
-        await Promise.race([
-          setDoc(doc(db, 'batches', batchId), cleanPersistentBatch),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Batch doc timeout')), 3000))
-        ]);
-      } catch (batchErr) {
-        console.warn("[Firestore Batch Record Write] Notice:", batchErr);
+        const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
+        const snapshot = await uploadBytes(storageRef, fileBlob);
+        downloadUrl = await getDownloadURL(snapshot.ref);
+      } catch (stgErr) {
+        console.warn("Firebase Storage upload skipped or failed, proceeding with db save:", stgErr);
       }
-
-      addAuditLog(
-        uploaderName,
-        'Carga de Archivo',
-        `Subió '${persistentBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
-      );
-    } catch (e: any) {
-      console.warn("[Firestore Background Save] Notice:", e?.message || e);
     }
-  })();
+
+    // Save modified or new transactions to Firestore
+    if (changedTxs.length > 0) {
+      const chunks = [];
+      for (let i = 0; i < changedTxs.length; i += 500) {
+        chunks.push(changedTxs.slice(i, i + 500));
+      }
+      for (const chunk of chunks) {
+        const bWrite = writeBatch(db);
+        chunk.forEach(tx => {
+          const cleanTx: Record<string, any> = {};
+          for (const [key, value] of Object.entries(tx)) {
+            if (value !== undefined) {
+              cleanTx[key] = value;
+            }
+          }
+          bWrite.set(doc(db, 'transactions', tx.id), cleanTx);
+        });
+        await bWrite.commit();
+      }
+    }
+
+    // Save batch record to Firestore
+    const persistentBatch: UploadBatch = {
+      ...newBatch,
+      archivoUrl: downloadUrl || undefined
+    };
+
+    const cleanPersistentBatch: Record<string, any> = {};
+    for (const [key, value] of Object.entries(persistentBatch)) {
+      if (value !== undefined) {
+        cleanPersistentBatch[key] = value;
+      }
+    }
+    await setDoc(doc(db, 'batches', batchId), cleanPersistentBatch);
+
+    await addAuditLog(
+      uploaderName,
+      'Carga de Archivo',
+      `Subió '${persistentBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
+    );
+  } catch (e: any) {
+    console.warn("[Firestore Upload Sync Warning]:", e?.message || e);
+  }
 
   return { imported, duplicates };
 }
@@ -1530,6 +1524,13 @@ export function clearAllDatabase(usuario: string) {
 
   (async () => {
     try {
+      // Broadcast wipe to all connected devices via Firestore
+      await setDoc(doc(db, 'configs', 'wipeState'), {
+        wipeTime,
+        wipedBy: usuario,
+        timestamp: getColombiaDateTime().dateTimeStr
+      }).catch(e => console.warn("[WipeState Firestore Error]:", e));
+
       const collectionsToClear = ['transactions', 'batches', 'cierres', 'logs', 'chat'];
       for (const colName of collectionsToClear) {
         try {
