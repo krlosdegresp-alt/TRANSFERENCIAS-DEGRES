@@ -191,6 +191,14 @@ export function initializeRealtimeListeners() {
   if (isInitialized) return;
   isInitialized = true;
 
+  const handleListenerError = (name: string) => (err: any) => {
+    if (err?.code === 'resource-exhausted') {
+      console.warn(`[Firestore Quota] Limit reached for ${name}. App running on local cache.`);
+    } else {
+      console.warn(`[Firestore Listener] ${name} error:`, err?.message || err);
+    }
+  };
+
   // 1. Users listener
   onSnapshot(collection(db, 'users'), (snapshot) => {
     let usersList: User[] = [];
@@ -200,7 +208,7 @@ export function initializeRealtimeListeners() {
 
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
     notifyListeners();
-  });
+  }, handleListenerError('users'));
 
   // 2. Transactions listener
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
@@ -221,7 +229,7 @@ export function initializeRealtimeListeners() {
 
     localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
     notifyListeners();
-  });
+  }, handleListenerError('transactions'));
 
   // 3. Batches listener
   onSnapshot(collection(db, 'batches'), (snapshot) => {
@@ -234,7 +242,7 @@ export function initializeRealtimeListeners() {
 
     localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
     notifyListeners();
-  });
+  }, handleListenerError('batches'));
 
   // 4. Cierres listener
   onSnapshot(collection(db, 'cierres'), (snapshot) => {
@@ -245,7 +253,7 @@ export function initializeRealtimeListeners() {
 
     localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierresList));
     notifyListeners();
-  });
+  }, handleListenerError('cierres'));
 
   // 5. Audit logs listener
   onSnapshot(collection(db, 'logs'), (snapshot) => {
@@ -258,7 +266,7 @@ export function initializeRealtimeListeners() {
 
     localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(logsList.slice(0, 500)));
     notifyListeners();
-  });
+  }, handleListenerError('logs'));
 
   // 6. Chat messages listener
   onSnapshot(collection(db, 'chat'), (snapshot) => {
@@ -271,7 +279,7 @@ export function initializeRealtimeListeners() {
 
     localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(chatList));
     notifyListeners();
-  });
+  }, handleListenerError('chat'));
 
   // 7. Video calls listener
   onSnapshot(collection(db, 'videocalls'), (snapshot) => {
@@ -285,7 +293,7 @@ export function initializeRealtimeListeners() {
 
     localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(callsList));
     notifyListeners();
-  });
+  }, handleListenerError('videocalls'));
 
   // 8. Reports config listener
   onSnapshot(doc(db, 'configs', 'reports'), (docSnap) => {
@@ -303,7 +311,7 @@ export function initializeRealtimeListeners() {
       localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(defaultConfig));
     }
     notifyListeners();
-  });
+  }, handleListenerError('reports_config'));
 
   // 9. System config listener (Maintenance mode)
   onSnapshot(doc(db, 'configs', 'system'), (docSnap) => {
@@ -316,12 +324,9 @@ export function initializeRealtimeListeners() {
         maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
       };
       localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(defaultConfig));
-      setDoc(doc(db, 'configs', 'system'), defaultConfig).catch(err => {
-        console.error("Error seeding default system config:", err);
-      });
     }
     notifyListeners();
-  });
+  }, handleListenerError('system_config'));
 }
 
 // Start listeners immediately on import
@@ -381,6 +386,7 @@ export async function setMaintenanceMode(
 
 // Ensure Carlos Ti and other predefined users are in Firestore if not already present
 async function ensurePredefinedUsersInFirestore() {
+  if (localStorage.getItem('firestore_users_seeded_v1')) return;
   try {
     const usersColRef = collection(db, 'users');
     const snap = await getDocs(usersColRef);
@@ -393,14 +399,17 @@ async function ensurePredefinedUsersInFirestore() {
       await bWrite.commit();
       console.log("PREDEFINED_USERS successfully seeded.");
     }
+    localStorage.setItem('firestore_users_seeded_v1', 'true');
   } catch (error) {
-    console.error("Error ensuring predefined users in Firestore:", error);
+    console.warn("Error ensuring predefined users in Firestore (falling back to local):", error);
+    localStorage.setItem('firestore_users_seeded_v1', 'true');
   }
 }
 ensurePredefinedUsersInFirestore();
 
 // Ensure initial transactions are seeded if none exist in Firestore
 async function ensurePredefinedTransactionsInFirestore() {
+  if (localStorage.getItem('firestore_txs_seeded_v1')) return;
   try {
     const txsColRef = collection(db, 'transactions');
     const snap = await getDocs(txsColRef);
@@ -413,8 +422,10 @@ async function ensurePredefinedTransactionsInFirestore() {
       await bWrite.commit();
       console.log("INITIAL_TRANSACTIONS successfully seeded.");
     }
+    localStorage.setItem('firestore_txs_seeded_v1', 'true');
   } catch (error) {
-    console.error("Error ensuring predefined transactions in Firestore:", error);
+    console.warn("Error ensuring predefined transactions in Firestore (falling back to local):", error);
+    localStorage.setItem('firestore_txs_seeded_v1', 'true');
   }
 }
 ensurePredefinedTransactionsInFirestore();
