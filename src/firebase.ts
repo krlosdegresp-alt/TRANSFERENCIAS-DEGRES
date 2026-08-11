@@ -58,82 +58,16 @@ const STORAGE_REPORT_CONFIG_KEY = 'transf_report_config';
 const STORAGE_SYSTEM_CONFIG_KEY = 'transf_system_config';
 const STORAGE_WIPE_TIME_KEY = 'transf_db_wiped_timestamp';
 
-// Initial mockup data for transactions so that the dashboard doesn't start completely blank if no data is in cloud
-const INITIAL_TRANSACTIONS: Transaction[] = [
-  {
-    id: 'tx_6519_20260619_0915_543000_transferencia_qr',
-    llaveUnica: 'tx_6519_20260619_0915_543000_transferencia_qr',
-    fecha: '2026-06-19',
-    hora: '09:15:32',
-    descripcion: 'TRANSFERENCIA INSTANTANEA QR BANCO',
-    valor: 543000,
-    cuenta: '987000006519',
-    sede: 'Guayabal',
-    identificada: false,
-    fechaCarga: '2026-06-19 08:00:00',
-    esHistorico: false
-  },
-  {
-    id: 'tx_0916_20260619_1030_125000_transferencia_corresponsal',
-    llaveUnica: 'tx_0916_20260619_1030_125000_transferencia_corresponsal',
-    fecha: '2026-06-19',
-    hora: '10:30:15',
-    descripcion: 'PAGO QR COBRU ADM',
-    valor: 125000,
-    cuenta: '123000000916',
-    sede: 'Sabaneta',
-    identificada: true,
-    fechaIdentificacion: '2026-06-19 11:20:00',
-    usuarioIdentificacion: 'Sofía Montoya (Caja Sabaneta)',
-    asesor: 'Mateo Osorio (Socio Comercial)',
-    tipoDocumento: 'Remisión',
-    fechaCarga: '2026-06-19 08:00:00',
-    esHistorico: false
-  },
-  {
-    id: 'tx_6807_20260619_1110_980000_transf_app_bancaria',
-    llaveUnica: 'tx_6807_20260619_1110_980000_transf_app_bancaria',
-    fecha: '2026-06-19',
-    hora: '11:10:00',
-    descripcion: 'TRANSFERENCIA DE CUENTA A CUENTA',
-    valor: 980000,
-    cuenta: '456000006807',
-    sede: 'Naranjal',
-    identificada: false,
-    fechaCarga: '2026-06-19 08:00:00',
-    esHistorico: false
-  },
-  {
-    id: 'tx_6519_20260618_1422_320000_abono_cliente',
-    llaveUnica: 'tx_6519_20260618_1422_320000_abono_cliente',
-    fecha: '2026-06-18',
-    hora: '14:22:45',
-    descripcion: 'PAGO RECI QR SEDE 1',
-    valor: 320000,
-    cuenta: '987000006519',
-    sede: 'Guayabal',
-    identificada: true,
-    fechaIdentificacion: '2026-06-18 15:00:00',
-    usuarioIdentificacion: 'Lucía Pérez (Caja Guayabal)',
-    asesor: 'Mateo Osorio (Socio Comercial)',
-    tipoDocumento: 'Recibo',
-    fechaCarga: '2026-06-18 17:00:00',
-    esHistorico: false
-  },
-  {
-    id: 'tx_0916_20260618_0845_450000_compra_mayo',
-    llaveUnica: 'tx_0916_20260618_0845_450000_compra_mayo',
-    fecha: '2026-06-18',
-    hora: '08:45:10',
-    descripcion: 'TRANSFERENCIA ACH BANCO EXT',
-    valor: 450000,
-    cuenta: '123000000916',
-    sede: 'Sabaneta',
-    identificada: false,
-    fechaCarga: '2026-06-18 17:00:00',
-    esHistorico: false
-  }
-];
+// Initial mockup data for transactions (set to empty so cleared database stays 100% empty)
+const INITIAL_TRANSACTIONS: Transaction[] = [];
+
+// Helper to parse date strings safely across JS engines
+function parseTimestampMs(dateStr?: string | null): number {
+  if (!dateStr) return 0;
+  const isoStr = dateStr.includes(' ') ? dateStr.replace(' ', 'T') : dateStr;
+  const val = new Date(isoStr).getTime();
+  return isNaN(val) ? 0 : val;
+}
 
 // Event bus for real-time reactivity without page reload
 type Listener = () => void;
@@ -242,12 +176,9 @@ export function initializeRealtimeListeners() {
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as Transaction;
       if (wipeTime > 0) {
-        let docTime = 0;
-        if (data.fechaCarga) {
-          docTime = new Date(data.fechaCarga).getTime() || 0;
-        }
-        if (docTime > 0 && docTime < wipeTime) {
-          return; // Skip pre-wipe document
+        const docTime = parseTimestampMs(data.fechaCarga);
+        if (docTime <= wipeTime) {
+          return; // Skip document created before database wipe
         }
       }
       txList.push(data);
@@ -276,12 +207,9 @@ export function initializeRealtimeListeners() {
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as UploadBatch;
       if (wipeTime > 0) {
-        let docTime = 0;
-        if (data.fechaCarga) {
-          docTime = new Date(data.fechaCarga).getTime() || 0;
-        }
-        if (docTime > 0 && docTime < wipeTime) {
-          return; // Skip pre-wipe batch
+        const docTime = parseTimestampMs(data.fechaCarga);
+        if (docTime <= wipeTime) {
+          return; // Skip batch created before database wipe
         }
       }
       batchList.push(data);
@@ -302,12 +230,9 @@ export function initializeRealtimeListeners() {
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as CierreCaja;
       if (wipeTime > 0) {
-        let docTime = 0;
-        if (data.fecha) {
-          docTime = new Date(data.fecha).getTime() || 0;
-        }
-        if (docTime > 0 && docTime < wipeTime) {
-          return; // Skip pre-wipe closure
+        const docTime = parseTimestampMs(data.fecha);
+        if (docTime <= wipeTime) {
+          return; // Skip closure created before database wipe
         }
       }
       cierresList.push(data);
@@ -931,73 +856,84 @@ export async function uploadBankTransactions(
 
   notifyListeners();
 
-  // 2. Persistent upload & db save with graceful fallback so UI never hangs or crashes
-  try {
-    let downloadUrl = '';
-    if (fileBlob) {
-      try {
-        const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
-        // 3-second timeout to avoid hanging if storage is unreachable or unconfigured
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Storage upload timeout (3s)')), 3000)
-        );
-        const snapshot = await Promise.race([
-          uploadBytes(storageRef, fileBlob),
-          timeoutPromise
-        ]) as any;
-        downloadUrl = await getDownloadURL(snapshot.ref);
-      } catch (stgErr) {
-        console.warn("Firebase Storage upload skipped or failed, proceeding with db save:", stgErr);
+  // 2. Persistent upload & db save in non-blocking background task (so UI completes instantly)
+  (async () => {
+    try {
+      let downloadUrl = '';
+      if (fileBlob) {
+        try {
+          const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Storage upload timeout (3s)')), 3000)
+          );
+          const snapshot = await Promise.race([
+            uploadBytes(storageRef, fileBlob),
+            timeoutPromise
+          ]) as any;
+          downloadUrl = await getDownloadURL(snapshot.ref);
+        } catch (stgErr) {
+          console.warn("Firebase Storage upload skipped or failed, proceeding with db save:", stgErr);
+        }
       }
-    }
 
-    // Save ONLY modified/new transactions to Firestore in chunks of 500
-    if (changedTxs.length > 0) {
-      const chunks = [];
-      for (let i = 0; i < changedTxs.length; i += 500) {
-        chunks.push(changedTxs.slice(i, i + 500));
-      }
-      for (const chunk of chunks) {
-        const bWrite = writeBatch(db);
-        chunk.forEach(tx => {
-          const cleanTx: Record<string, any> = {};
-          for (const [key, value] of Object.entries(tx)) {
-            if (value !== undefined) {
-              cleanTx[key] = value;
+      // Save ONLY modified/new transactions to Firestore in chunks of 500
+      if (changedTxs.length > 0) {
+        const chunks = [];
+        for (let i = 0; i < changedTxs.length; i += 500) {
+          chunks.push(changedTxs.slice(i, i + 500));
+        }
+        for (const chunk of chunks) {
+          const bWrite = writeBatch(db);
+          chunk.forEach(tx => {
+            const cleanTx: Record<string, any> = {};
+            for (const [key, value] of Object.entries(tx)) {
+              if (value !== undefined) {
+                cleanTx[key] = value;
+              }
             }
+            bWrite.set(doc(db, 'transactions', tx.id), cleanTx);
+          });
+          try {
+            await Promise.race([
+              bWrite.commit(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Batch write timeout')), 3000))
+            ]);
+          } catch (chunkErr) {
+            console.warn("[Firestore Chunk Write] Notice:", chunkErr);
           }
-          bWrite.set(doc(db, 'transactions', tx.id), cleanTx);
-        });
-        await bWrite.commit();
+        }
       }
-    }
 
-    // Save upload batch record with file URL
-    const persistentBatch: UploadBatch = {
-      ...newBatch,
-      archivoUrl: downloadUrl || undefined
-    };
-    
-    const cleanPersistentBatch: Record<string, any> = {};
-    for (const [key, value] of Object.entries(persistentBatch)) {
-      if (value !== undefined) {
-        cleanPersistentBatch[key] = value;
+      // Save upload batch record with file URL
+      const persistentBatch: UploadBatch = {
+        ...newBatch,
+        archivoUrl: downloadUrl || undefined
+      };
+      
+      const cleanPersistentBatch: Record<string, any> = {};
+      for (const [key, value] of Object.entries(persistentBatch)) {
+        if (value !== undefined) {
+          cleanPersistentBatch[key] = value;
+        }
       }
-    }
-    await setDoc(doc(db, 'batches', batchId), cleanPersistentBatch);
+      try {
+        await Promise.race([
+          setDoc(doc(db, 'batches', batchId), cleanPersistentBatch),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Batch doc timeout')), 3000))
+        ]);
+      } catch (batchErr) {
+        console.warn("[Firestore Batch Record Write] Notice:", batchErr);
+      }
 
-    await addAuditLog(
-      uploaderName,
-      'Carga de Archivo',
-      `Subió '${persistentBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
-    );
-  } catch (e: any) {
-    if (e?.code === 'resource-exhausted') {
-      console.warn("[Firestore Quota] Limit reached during file upload. Movements preserved in local storage.");
-    } else {
-      console.warn("[Firestore Upload] Remote save step warning, local cache updated successfully:", e?.message || e);
+      addAuditLog(
+        uploaderName,
+        'Carga de Archivo',
+        `Subió '${persistentBatch.nombreArchivo}'. Registros: ${newTxs.length}. Importados: ${imported}, Duplicados: ${duplicates}`
+      );
+    } catch (e: any) {
+      console.warn("[Firestore Background Save] Notice:", e?.message || e);
     }
-  }
+  })();
 
   return { imported, duplicates };
 }
