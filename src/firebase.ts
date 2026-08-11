@@ -155,7 +155,7 @@ function notifyListeners() {
   });
 }
 
-// Helper to sync local state array updates to Firestore collections
+// Helper to sync local state array updates to Firestore collections efficiently
 async function syncArrayToFirestore<T extends { id: string }>(
   collectionName: string,
   newItems: T[]
@@ -163,22 +163,44 @@ async function syncArrayToFirestore<T extends { id: string }>(
   try {
     const colRef = collection(db, collectionName);
     const snapshot = await getDocs(colRef);
-    const existingIds = new Set(snapshot.docs.map(doc => doc.id));
+    const existingDocsMap = new Map<string, any>();
+    snapshot.docs.forEach(d => existingDocsMap.set(d.id, d.data()));
+
     const newIds = new Set(newItems.map(item => item.id));
 
+    const batch = writeBatch(db);
+    let opCount = 0;
+
     // Delete items not present in the new set
-    for (const docId of existingIds) {
+    for (const docId of existingDocsMap.keys()) {
       if (!newIds.has(docId)) {
-        await deleteDoc(doc(db, collectionName, docId));
+        batch.delete(doc(db, collectionName, docId));
+        opCount++;
       }
     }
 
-    // Write / Update current ones
+    // Write / Update current ones only if changed
     for (const item of newItems) {
-      await setDoc(doc(db, collectionName, item.id), item);
+      const existing = existingDocsMap.get(item.id);
+      if (!existing || JSON.stringify(existing) !== JSON.stringify(item)) {
+        const cleanObj: Record<string, any> = {};
+        for (const [k, v] of Object.entries(item)) {
+          if (v !== undefined) cleanObj[k] = v;
+        }
+        batch.set(doc(db, collectionName, item.id), cleanObj);
+        opCount++;
+      }
     }
-  } catch (error) {
-    console.error(`Error syncing collection ${collectionName} to Firestore:`, error);
+
+    if (opCount > 0) {
+      await batch.commit();
+    }
+  } catch (error: any) {
+    if (error?.code === 'resource-exhausted') {
+      console.warn(`[Firestore Quota] Limit reached for collection ${collectionName}. Data preserved in local storage.`);
+    } else {
+      console.warn(`[Firestore Sync] Error syncing collection ${collectionName}:`, error?.message || error);
+    }
   }
 }
 
@@ -503,34 +525,58 @@ export async function saveUsers(users: User[]) {
 }
 
 export async function createUserInFirestore(user: User): Promise<void> {
-  const docRef = doc(db, 'users', user.id);
-  const cleanUser: Record<string, any> = {};
-  for (const [key, value] of Object.entries(user)) {
-    if (value !== undefined) {
-      cleanUser[key] = value;
+  try {
+    const docRef = doc(db, 'users', user.id);
+    const cleanUser: Record<string, any> = {};
+    for (const [key, value] of Object.entries(user)) {
+      if (value !== undefined) {
+        cleanUser[key] = value;
+      }
+    }
+    await setDoc(docRef, cleanUser);
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted') {
+      console.warn(`[Firestore Quota] Limit reached for createUserInFirestore. User saved locally.`);
+    } else {
+      console.warn(`[Firestore User] Error creating user:`, err?.message || err);
     }
   }
-  await setDoc(docRef, cleanUser);
 }
 
 export async function deleteUserInFirestore(userId: string): Promise<void> {
-  const docRef = doc(db, 'users', userId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'users', userId);
+    await deleteDoc(docRef);
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted') {
+      console.warn(`[Firestore Quota] Limit reached for deleteUserInFirestore. User deleted locally.`);
+    } else {
+      console.warn(`[Firestore User] Error deleting user:`, err?.message || err);
+    }
+  }
 }
 
 export async function updateUserInFirestore(userId: string, changes: Partial<User>): Promise<void> {
-  const docRef = doc(db, 'users', userId);
-  
-  const cleanChanges: Record<string, any> = {};
-  for (const [key, value] of Object.entries(changes)) {
-    if (value === undefined) {
-      cleanChanges[key] = deleteField();
+  try {
+    const docRef = doc(db, 'users', userId);
+    
+    const cleanChanges: Record<string, any> = {};
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === undefined) {
+        cleanChanges[key] = deleteField();
+      } else {
+        cleanChanges[key] = value;
+      }
+    }
+    
+    await updateDoc(docRef, cleanChanges);
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted') {
+      console.warn(`[Firestore Quota] Limit reached for updateUserInFirestore. User updated locally.`);
     } else {
-      cleanChanges[key] = value;
+      console.warn(`[Firestore User] Error updating user:`, err?.message || err);
     }
   }
-  
-  await updateDoc(docRef, cleanChanges);
 }
 
 export function getCurrentUser(): User | null {
@@ -1677,7 +1723,15 @@ export async function startVideoCall(
   localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(currentCalls));
   notifyListeners();
 
-  await setDoc(doc(db, 'videocalls', id), newCall);
+  try {
+    await setDoc(doc(db, 'videocalls', id), newCall);
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted') {
+      console.warn(`[Firestore Quota] Limit reached for startVideoCall. Video call recorded locally.`);
+    } else {
+      console.warn(`[Firestore VideoCall] Error starting video call:`, err?.message || err);
+    }
+  }
   const callTypeName = type === 'voice' ? 'Llamada de voz' : 'Videollamada';
   addAuditLog(senderName, `${callTypeName} Iniciada`, `Inició una ${callTypeName.toLowerCase()} para ${receiverName}.`);
 
@@ -1704,7 +1758,15 @@ export async function updateVideoCallStatus(callId: string, status: 'accepted' |
     localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(calls));
     notifyListeners();
 
-    await setDoc(doc(db, 'videocalls', callId), updatePayload, { merge: true });
+    try {
+      await setDoc(doc(db, 'videocalls', callId), updatePayload, { merge: true });
+    } catch (err: any) {
+      if (err?.code === 'resource-exhausted') {
+        console.warn(`[Firestore Quota] Limit reached for updateVideoCallStatus. Local status updated.`);
+      } else {
+        console.warn(`[Firestore VideoCall] Error updating status:`, err?.message || err);
+      }
+    }
 
     const callTypeName = call.type === 'voice' ? 'Llamada de voz' : 'Videollamada';
 
@@ -1776,6 +1838,14 @@ export async function updateReportConfig(config: Partial<ReportConfig>): Promise
   localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(updated));
   notifyListeners();
 
-  await setDoc(doc(db, 'configs', 'reports'), updated, { merge: true });
+  try {
+    await setDoc(doc(db, 'configs', 'reports'), updated, { merge: true });
+  } catch (err: any) {
+    if (err?.code === 'resource-exhausted') {
+      console.warn(`[Firestore Quota] Limit reached for updateReportConfig. Saved locally.`);
+    } else {
+      console.warn(`[Firestore ReportConfig] Error updating config:`, err?.message || err);
+    }
+  }
 }
 
