@@ -508,10 +508,20 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
                 <button
                   id="btn-commit-to-firestore"
                   onClick={handleCommitQueue}
-                  className="w-full sm:w-auto bg-[#1A2D7C] hover:bg-[#1A2D7C]/90 text-white font-bold text-xs py-2 px-5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm"
+                  disabled={loading}
+                  className="w-full sm:w-auto bg-[#1A2D7C] hover:bg-[#1A2D7C]/90 text-white font-bold text-xs py-2 px-5 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  <CheckCircle className="h-4 w-4" />
-                  Confirmar y Registrar en Firestore
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Procesando e Ingeriendo Archivo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span>Confirmar y Registrar en el Sistema</span>
+                    </>
+                  )}
                 </button>
               </div>
             )}
