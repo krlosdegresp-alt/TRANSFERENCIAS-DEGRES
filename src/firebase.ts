@@ -317,16 +317,59 @@ export function initializeRealtimeListeners() {
   onSnapshot(doc(db, 'configs', 'system'), (docSnap) => {
     if (docSnap.exists()) {
       const data = docSnap.data() as SystemConfig;
-      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(data));
+      const currentLocal = getSystemConfig();
+      
+      const localTime = currentLocal.updatedAt || 0;
+      const remoteTime = data.updatedAt || 0;
+
+      // Only accept remote update if it is newer or equal, or if local has no timestamp
+      if (remoteTime >= localTime) {
+        localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(data));
+        notifyListeners();
+      } else {
+        console.warn("[SystemConfig] Ignoring stale remote config from Firestore because local config is newer.");
+      }
     } else {
-      const defaultConfig: SystemConfig = {
-        maintenanceMode: false,
-        maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.'
-      };
-      localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(defaultConfig));
+      const currentLocal = getSystemConfig();
+      if (!currentLocal.updatedAt) {
+        const defaultConfig: SystemConfig = {
+          maintenanceMode: false,
+          maintenanceMessage: 'El aplicativo web se encuentra en mantenimiento y actualización por un Administrador.',
+          updatedAt: Date.now()
+        };
+        localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(defaultConfig));
+        notifyListeners();
+      }
     }
-    notifyListeners();
   }, handleListenerError('system_config'));
+}
+
+// Inter-tab / inter-window broadcast for system config changes
+if (typeof window !== 'undefined') {
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const bc = new BroadcastChannel('transf_system_config_bc');
+      bc.onmessage = (event) => {
+        if (event.data && typeof event.data.maintenanceMode === 'boolean') {
+          const currentLocal = getSystemConfig();
+          const localTime = currentLocal.updatedAt || 0;
+          const bcTime = event.data.updatedAt || 0;
+          if (bcTime >= localTime) {
+            localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(event.data));
+            notifyListeners();
+          }
+        }
+      };
+    } catch (e) {
+      // BroadcastChannel optional
+    }
+  }
+
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_SYSTEM_CONFIG_KEY && e.newValue) {
+      notifyListeners();
+    }
+  });
 }
 
 // Start listeners immediately on import
@@ -355,22 +398,32 @@ export async function setMaintenanceMode(
   adminUser: User,
   customMessage?: string
 ): Promise<void> {
-  const current = getSystemConfig();
+  const now = Date.now();
   
   // Clean object without undefined values so Firestore setDoc does not throw
   const updated: SystemConfig = {
     maintenanceMode: active,
     maintenanceMessage: customMessage || 'El aplicativo web se encuentra en proceso de mantenimiento y actualización por la Administración.',
     activatedBy: active ? (adminUser?.nombre || 'Administrador') : '',
-    activatedAt: active ? getColombiaDateTime().dateTimeStr : ''
+    activatedAt: active ? getColombiaDateTime().dateTimeStr : '',
+    updatedAt: now
   };
 
-  // Update local cache and notify listeners immediately for instant UI feedback
+  // 1. Update local cache and notify listeners immediately for instant UI feedback
   localStorage.setItem(STORAGE_SYSTEM_CONFIG_KEY, JSON.stringify(updated));
   notifyListeners();
 
+  // 2. Post to BroadcastChannel for instant multi-tab sync on same origin
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const bc = new BroadcastChannel('transf_system_config_bc');
+      bc.postMessage(updated);
+      bc.close();
+    } catch (e) {}
+  }
+
   try {
-    // Write to Firestore document
+    // 3. Write to Firestore document
     await setDoc(doc(db, 'configs', 'system'), updated);
     addAuditLog(
       adminUser?.nombre || 'Administrador',

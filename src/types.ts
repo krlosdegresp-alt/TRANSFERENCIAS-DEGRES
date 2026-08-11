@@ -120,6 +120,7 @@ export interface SystemConfig {
   maintenanceMessage?: string;
   activatedBy?: string;
   activatedAt?: string;
+  updatedAt?: number;
 }
 
 
