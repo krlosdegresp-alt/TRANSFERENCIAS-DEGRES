@@ -69,6 +69,12 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
   const [editingCierreId, setEditingCierreId] = useState<string | null>(null);
   const [nuevoValorCierre, setNuevoValorCierre] = useState<string>('');
 
+  // Date range filter states for backup export
+  const [backupFechaDesde, setBackupFechaDesde] = useState<string>('');
+  const [backupFechaHasta, setBackupFechaHasta] = useState<string>('');
+  const [backupSede, setBackupSede] = useState<Sede | 'Todas'>('Todas');
+  const [backupEstado, setBackupEstado] = useState<'Todas' | 'Identificadas' | 'Pendientes'>('Todas');
+
   // Custom dialog and modal states to bypass iframe blocking restrictions
   const [customConfirm, setCustomConfirm] = useState<{
     title: string;
@@ -444,9 +450,41 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
     );
   };
 
-  // Monthly archive: downloads CSV and marks everything as historic
-  const generateBackupWorkbook = () => {
-    const formattedData = transactions.map(tx => ({
+  // Monthly archive or filtered backup generator
+  const generateBackupWorkbook = (
+    fechaDesde?: string,
+    fechaHasta?: string,
+    sedeFilter: Sede | 'Todas' = 'Todas',
+    estadoFilter: 'Todas' | 'Identificadas' | 'Pendientes' = 'Todas'
+  ) => {
+    let filteredTxs = [...transactions];
+    if (fechaDesde) {
+      filteredTxs = filteredTxs.filter(tx => tx.fecha >= fechaDesde);
+    }
+    if (fechaHasta) {
+      filteredTxs = filteredTxs.filter(tx => tx.fecha <= fechaHasta);
+    }
+    if (sedeFilter !== 'Todas') {
+      filteredTxs = filteredTxs.filter(tx => tx.sede === sedeFilter);
+    }
+    if (estadoFilter === 'Identificadas') {
+      filteredTxs = filteredTxs.filter(tx => tx.identificada);
+    } else if (estadoFilter === 'Pendientes') {
+      filteredTxs = filteredTxs.filter(tx => !tx.identificada);
+    }
+
+    let filteredCierres = [...cierresCajaList];
+    if (fechaDesde) {
+      filteredCierres = filteredCierres.filter(c => c.fecha >= fechaDesde);
+    }
+    if (fechaHasta) {
+      filteredCierres = filteredCierres.filter(c => c.fecha <= fechaHasta);
+    }
+    if (sedeFilter !== 'Todas') {
+      filteredCierres = filteredCierres.filter(c => c.sede === sedeFilter);
+    }
+
+    const formattedData = filteredTxs.map(tx => ({
       'Llave Unica': tx.llaveUnica,
       'Comprobante / Referencia': tx.comprobante || 'Ninguno',
       'N° Recibo Caja': tx.nroReciboCaja || 'Ninguno',
@@ -465,7 +503,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       'Es Historico (S/N)': tx.esHistorico ? 'S' : 'N'
     }));
 
-    const formattedCierres = cierresCajaList.map(c => ({
+    const formattedCierres = filteredCierres.map(c => ({
       'Sede Física': c.sede,
       'Fecha Cierre': c.fecha,
       'Nombre Cajera': c.nombreCajera,
@@ -473,7 +511,9 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       'Total Identificado ($)': c.totalIdentificado,
       'Total Aplicativo ($)': c.totalAplicativo,
       'Coincide Conciliación': c.coincide ? 'SÍ' : 'NO',
-      'Motivo Descuadre': c.motivoDiferencia || 'Ninguno'
+      'Motivo Descuadre': c.motivoDiferencia || 'Ninguno',
+      'Solicitó Desbloqueo': c.solicitaDesbloqueo ? 'SÍ' : 'NO',
+      'Motivo Desbloqueo': c.motivoDesbloqueo || 'Ninguno'
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(formattedData);
@@ -490,7 +530,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       { wch: 16 }
     ];
 
-    return workbook;
+    return { workbook, countTxs: filteredTxs.length, countCierres: filteredCierres.length };
   };
 
   const handleDownloadBackupOnly = () => {
@@ -499,12 +539,34 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       return;
     }
     try {
-      const workbook = generateBackupWorkbook();
+      const { workbook, countTxs, countCierres } = generateBackupWorkbook(
+        backupFechaDesde,
+        backupFechaHasta,
+        backupSede,
+        backupEstado
+      );
+
+      if (countTxs === 0 && countCierres === 0) {
+        triggerAlert('Sin Datos en el Rango', 'No se encontraron transacciones ni cierres de caja en el rango de fechas/filtros seleccionados.', 'warning');
+        return;
+      }
+
       const dateStr = getColombiaDateTime().dateStr;
-      XLSX.writeFile(workbook, `Respaldo_Completo_Transferencias_Cierres_${dateStr}.xlsx`);
+      const rangeLabel = (backupFechaDesde || backupFechaHasta)
+        ? `_${backupFechaDesde || 'inicio'}_a_${backupFechaHasta || dateStr}`
+        : `_completo_${dateStr}`;
+
+      XLSX.writeFile(workbook, `Respaldo_Transferencias_y_Cierres${rangeLabel}.xlsx`);
+      
+      addAuditLog(
+        currentUser.nombre,
+        'Copia de Seguridad Exportada',
+        `Exportó copia sin limpiar (${countTxs} transacciones, ${countCierres} cierres). Rango: ${backupFechaDesde || 'Desde inicio'} a ${backupFechaHasta || 'Hasta hoy'}`
+      );
+
       triggerAlert(
         'Copia de Seguridad Generada',
-        'Se descargó el archivo Excel con todas las transacciones y cierres de caja. La base de datos no fue modificada.',
+        `Se descargó el archivo Excel con ${countTxs} transacciones y ${countCierres} cierres de caja.\nLa base de datos se mantiene intacta.`,
         'success'
       );
     } catch (err) {
@@ -1430,16 +1492,77 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 border-t border-slate-200 pt-6">
-              {/* Opción 1: Solo Copia de Seguridad */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+              {/* Opción 1: Copia de Seguridad con Filtro de Fechas */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3 lg:col-span-2">
                 <div>
-                  <div className="flex items-center gap-2 font-bold text-slate-800 text-xs mb-1">
-                    <Download className="h-4 w-4 text-[#1A2D7C]" />
-                    Copia de Seguridad
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2 font-bold text-slate-800 text-xs">
+                      <Download className="h-4 w-4 text-[#1A2D7C]" />
+                      Copia de Seguridad (Sin Limpiar)
+                    </div>
+                    {(backupFechaDesde || backupFechaHasta || backupSede !== 'Todas' || backupEstado !== 'Todas') && (
+                      <button
+                        onClick={() => {
+                          setBackupFechaDesde('');
+                          setBackupFechaHasta('');
+                          setBackupSede('Todas');
+                          setBackupEstado('Todas');
+                        }}
+                        className="text-[10px] text-blue-700 hover:underline font-bold"
+                      >
+                        Limpiar Filtros
+                      </button>
+                    )}
                   </div>
-                  <p className="text-[11px] text-slate-500 leading-normal">
-                    Descarga el archivo Excel completo (transacciones y cierres) <strong>sin borrar ni archivar nada</strong>.
+                  <p className="text-[11px] text-slate-500 leading-normal mb-3">
+                    Descarga transacciones y cierres de caja en Excel <strong>sin borrar ni alterar nada</strong>. Puedes filtrar por rango de fechas, sede y estado de conciliación:
                   </p>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 bg-white p-2.5 rounded-lg border border-slate-200">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Desde Fecha:</label>
+                      <input
+                        type="date"
+                        value={backupFechaDesde}
+                        onChange={e => setBackupFechaDesde(e.target.value)}
+                        className="w-full text-[11px] p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-[#1A2D7C]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Hasta Fecha:</label>
+                      <input
+                        type="date"
+                        value={backupFechaHasta}
+                        onChange={e => setBackupFechaHasta(e.target.value)}
+                        className="w-full text-[11px] p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-[#1A2D7C]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Sede:</label>
+                      <select
+                        value={backupSede}
+                        onChange={e => setBackupSede(e.target.value as any)}
+                        className="w-full text-[11px] p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-[#1A2D7C]"
+                      >
+                        <option value="Todas">Todas las sedes</option>
+                        <option value="Guayabal">Guayabal</option>
+                        <option value="Sabaneta">Sabaneta</option>
+                        <option value="Naranjal">Naranjal</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Estado:</label>
+                      <select
+                        value={backupEstado}
+                        onChange={e => setBackupEstado(e.target.value as any)}
+                        className="w-full text-[11px] p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-[#1A2D7C]"
+                      >
+                        <option value="Todas">Todas (Todas)</option>
+                        <option value="Identificadas">Identificadas</option>
+                        <option value="Pendientes">Pendientes</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
                 <button
                   id="btn-trigger-backup-only"
@@ -1447,7 +1570,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
                   className="w-full bg-[#1A2D7C] hover:bg-[#1A2D7C]/90 text-white py-2.5 px-4 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                 >
                   <Download className="h-4 w-4" />
-                  Descargar Copia (Sin Limpiar)
+                  Descargar Copia de Seguridad ({backupFechaDesde || backupFechaHasta ? 'Rango Seleccionado' : 'Todo'})
                 </button>
               </div>
 

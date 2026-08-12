@@ -69,6 +69,19 @@ function parseTimestampMs(dateStr?: string | null): number {
   return isNaN(val) ? 0 : val;
 }
 
+// Safe wrapper for localStorage.setItem to gracefully catch QuotaExceededError
+export function safeSetLocalStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e: any) {
+    if (e?.name === 'QuotaExceededError' || e?.code === 22 || e?.code === 1014) {
+      console.warn(`[LocalStorage Quota Exceeded] Could not cache key '${key}' locally. Real-time Firestore sync & in-memory state remain active.`);
+    } else {
+      console.warn(`[LocalStorage Error] Key '${key}':`, e);
+    }
+  }
+}
+
 // Event bus for real-time reactivity without page reload
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -163,7 +176,7 @@ export function initializeRealtimeListeners() {
       usersList.push(docSnap.data() as User);
     });
 
-    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(usersList));
+    safeSetLocalStorage(STORAGE_USERS_KEY, JSON.stringify(usersList));
     notifyListeners();
   }, handleListenerError('users'));
 
@@ -184,7 +197,7 @@ export function initializeRealtimeListeners() {
       return dateTimeB.localeCompare(dateTimeA);
     });
 
-    localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
+    safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
     notifyListeners();
   }, handleListenerError('transactions'));
 
@@ -197,7 +210,7 @@ export function initializeRealtimeListeners() {
 
     batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
 
-    localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
+    safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
     notifyListeners();
   }, handleListenerError('batches'));
 
@@ -208,7 +221,7 @@ export function initializeRealtimeListeners() {
       cierresList.push(docSnap.data() as CierreCaja);
     });
 
-    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierresList));
+    safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify(cierresList));
     notifyListeners();
   }, handleListenerError('cierres'));
 
@@ -221,7 +234,7 @@ export function initializeRealtimeListeners() {
 
     logsList.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
-    localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify(logsList.slice(0, 500)));
+    safeSetLocalStorage(STORAGE_LOGS_KEY, JSON.stringify(logsList.slice(0, 500)));
     notifyListeners();
   }, handleListenerError('logs'));
 
@@ -234,7 +247,7 @@ export function initializeRealtimeListeners() {
 
     chatList.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
-    localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(chatList));
+    safeSetLocalStorage(STORAGE_CHAT_KEY, JSON.stringify(chatList));
     notifyListeners();
   }, handleListenerError('chat'));
 
@@ -248,14 +261,14 @@ export function initializeRealtimeListeners() {
     // Sort: newest first
     callsList.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-    localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify(callsList));
+    safeSetLocalStorage(STORAGE_VIDEOCALLS_KEY, JSON.stringify(callsList));
     notifyListeners();
   }, handleListenerError('videocalls'));
 
   // 8. Reports config listener
   onSnapshot(doc(db, 'configs', 'reports'), (docSnap) => {
     if (docSnap.exists()) {
-      localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(docSnap.data()));
+      safeSetLocalStorage(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(docSnap.data()));
     } else {
       const defaultConfig: ReportConfig = {
         id: 'cajera_reports_visibility',
@@ -265,7 +278,7 @@ export function initializeRealtimeListeners() {
         showRendimientoAsesores: true,
         showFiltrosConsulta: false
       };
-      localStorage.setItem(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(defaultConfig));
+      safeSetLocalStorage(STORAGE_REPORT_CONFIG_KEY, JSON.stringify(defaultConfig));
     }
     notifyListeners();
   }, handleListenerError('reports_config'));
@@ -572,7 +585,7 @@ export function getTransactions(): Transaction[] {
 }
 
 export function saveTransactions(txs: Transaction[]) {
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(txs));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(txs));
   notifyListeners();
 
   // Async bulk sync to Firestore
@@ -807,7 +820,7 @@ export async function uploadBankTransactions(
   });
 
   // Immediate local state update
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(updatedTxs));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(updatedTxs));
 
   const finalFileName = fileName || 'archivo_movimientos.xlsx';
   const nowStr = getColombiaDateTime().dateTimeStr;
@@ -824,7 +837,7 @@ export async function uploadBankTransactions(
   };
 
   batches.unshift(newBatch);
-  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batches));
+  safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify(batches));
 
   notifyListeners();
 
@@ -841,7 +854,7 @@ export async function uploadBankTransactions(
       }
     }
 
-    // Save modified or new transactions to Firestore
+    // Save modified or new transactions to Firestore in chunks of 500
     if (changedTxs.length > 0) {
       const chunks = [];
       for (let i = 0; i < changedTxs.length; i += 500) {
@@ -856,7 +869,7 @@ export async function uploadBankTransactions(
               cleanTx[key] = value;
             }
           }
-          bWrite.set(doc(db, 'transactions', tx.id), cleanTx);
+          bWrite.set(doc(db, 'transactions', tx.id), cleanTx, { merge: true });
         });
         await bWrite.commit();
       }
@@ -902,9 +915,9 @@ export function revertUploadBatch(batchId: string, adminName: string): boolean {
   const deletedCount = beforeCount - filteredTxs.length;
 
   // 1. Optimistic UI update
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(filteredTxs));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(filteredTxs));
   batches.splice(batchIdx, 1);
-  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify(batches));
+  safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify(batches));
   notifyListeners();
 
   // 2. Async storage and firestore cleanup
@@ -1458,7 +1471,7 @@ export function rechazarDesbloqueoCierre(fecha: string, sede: Sede, adminUser: s
       motivoDesbloqueo: null
     };
     cierres[idx] = updatedCierre;
-    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+    safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
     notifyListeners();
 
     updateDoc(doc(db, 'cierres', id), {
@@ -1476,12 +1489,12 @@ export function rechazarDesbloqueoCierre(fecha: string, sede: Sede, adminUser: s
 
 export async function clearAllDatabase(usuario: string): Promise<void> {
   // 1. Instantly clear local storage cache and notify listeners
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_LOGS_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_CHAT_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_VIDEOCALLS_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_LOGS_KEY, JSON.stringify([]));
   localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
   notifyListeners();
 
@@ -1516,11 +1529,11 @@ export async function clearAllDatabase(usuario: string): Promise<void> {
   await addAuditLog(usuario, 'Limpieza Total', 'Se borraron todas las transacciones, exceles subidos e historial de cierres de caja del sistema.');
 
   // 5. Final local cache wipe & listener notification
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_BATCHES_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify([]));
-  localStorage.setItem(STORAGE_VIDEOCALLS_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_CHAT_KEY, JSON.stringify([]));
+  safeSetLocalStorage(STORAGE_VIDEOCALLS_KEY, JSON.stringify([]));
   notifyListeners();
 }
 
