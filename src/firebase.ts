@@ -707,16 +707,90 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
   return false;
 }
 
-export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number } {
-  const result: Transaction[] = [];
-  let removedCount = 0;
+// Fast O(1) Transaction Indexing Engine for Hyper-fast Deduplication
+interface TransactionIndex {
+  byId: Map<string, Transaction>;
+  byLlaveUnica: Map<string, Transaction>;
+  byComprobante: Map<string, Transaction>;
+  byValor: Map<number, Transaction[]>;
+}
+
+function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
+  const index: TransactionIndex = {
+    byId: new Map(),
+    byLlaveUnica: new Map(),
+    byComprobante: new Map(),
+    byValor: new Map()
+  };
 
   for (const tx of txs) {
-    const existingIndex = result.findIndex(existing => isDuplicateTransaction(existing, tx));
-    if (existingIndex !== -1) {
+    if (tx.id) index.byId.set(tx.id, tx);
+    if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
+
+    const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normComp && normComp.length >= 2) {
+      const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
+      const normVal = Math.round(tx.valor || 0);
+      index.byComprobante.set(`${normCta}_${normVal}_${normComp}`, tx);
+    }
+
+    const valKey = Math.round(tx.valor || 0);
+    const existingGroup = index.byValor.get(valKey);
+    if (existingGroup) {
+      existingGroup.push(tx);
+    } else {
+      index.byValor.set(valKey, [tx]);
+    }
+  }
+
+  return index;
+}
+
+function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex): Transaction | null {
+  // 1. Check ID
+  if (tx.id && index.byId.has(tx.id)) {
+    return index.byId.get(tx.id)!;
+  }
+
+  // 2. Check LlaveUnica
+  if (tx.llaveUnica && index.byLlaveUnica.has(tx.llaveUnica)) {
+    return index.byLlaveUnica.get(tx.llaveUnica)!;
+  }
+
+  // 3. Check Comprobante + Account + Valor
+  const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (normComp && normComp.length >= 2) {
+    const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
+    const normVal = Math.round(tx.valor || 0);
+    const compKey = `${normCta}_${normVal}_${normComp}`;
+    if (index.byComprobante.has(compKey)) {
+      return index.byComprobante.get(compKey)!;
+    }
+  }
+
+  // 4. Fast Fallback: Check candidate transactions sharing the exact rounded monetary amount
+  const valKey = Math.round(tx.valor || 0);
+  const candidates = index.byValor.get(valKey);
+  if (candidates && candidates.length > 0) {
+    for (const candidate of candidates) {
+      if (isDuplicateTransaction(candidate, tx)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number } {
+  const cleaned: Transaction[] = [];
+  let removedCount = 0;
+  const index = buildTransactionIndex([]);
+
+  for (const tx of txs) {
+    const existing = findMatchingDuplicateInIndex(tx, index);
+    if (existing) {
       removedCount++;
-      const existing = result[existingIndex];
-      // Merge: preserve identification, advisor, receipt number, oficina, and earliest/most complete details
       const isNowIdentified = existing.identificada || tx.identificada;
       const merged: Transaction = {
         ...existing,
@@ -731,13 +805,32 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
         tipoDocumento: existing.tipoDocumento || tx.tipoDocumento || null,
         justificacionIgnorado: existing.justificacionIgnorado || tx.justificacionIgnorado || null
       };
-      result[existingIndex] = merged;
+
+      const idx = cleaned.findIndex(c => c.id === existing.id);
+      if (idx !== -1) {
+        cleaned[idx] = merged;
+      }
+
+      index.byId.set(merged.id, merged);
+      if (merged.llaveUnica) index.byLlaveUnica.set(merged.llaveUnica, merged);
     } else {
-      result.push(tx);
+      cleaned.push(tx);
+      if (tx.id) index.byId.set(tx.id, tx);
+      if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
+      const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normComp && normComp.length >= 2) {
+        const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
+        const normVal = Math.round(tx.valor || 0);
+        index.byComprobante.set(`${normCta}_${normVal}_${normComp}`, tx);
+      }
+      const valKey = Math.round(tx.valor || 0);
+      const group = index.byValor.get(valKey);
+      if (group) group.push(tx);
+      else index.byValor.set(valKey, [tx]);
     }
   }
 
-  return { cleaned: result, removedCount };
+  return { cleaned, removedCount };
 }
 
 export async function purgeDuplicateTransactionsFromDatabase(adminName: string): Promise<{ totalPurged: number }> {
@@ -770,6 +863,7 @@ export async function uploadBankTransactions(
   const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(newTxs);
 
   const current = getTransactions();
+  const index = buildTransactionIndex(current);
   const currentMap = new Map(current.map(tx => [tx.id, tx]));
 
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -780,8 +874,8 @@ export async function uploadBankTransactions(
   const changedTxs: Transaction[] = [];
 
   cleanedNewTxs.forEach(tx => {
-    // Search for existing duplicates in current database
-    const existingTx = Array.from(currentMap.values()).find(t => isDuplicateTransaction(t, tx));
+    // Fast O(1) duplicate search
+    const existingTx = findMatchingDuplicateInIndex(tx, index);
 
     if (existingTx) {
       duplicates++;
@@ -800,6 +894,8 @@ export async function uploadBankTransactions(
         justificacionIgnorado: tx.justificacionIgnorado || existingTx.justificacionIgnorado || null
       };
       currentMap.set(existingTx.id, updatedTx);
+      index.byId.set(updatedTx.id, updatedTx);
+      if (updatedTx.llaveUnica) index.byLlaveUnica.set(updatedTx.llaveUnica, updatedTx);
       changedTxs.push(updatedTx);
     } else {
       const newTx = {
@@ -807,6 +903,8 @@ export async function uploadBankTransactions(
         batchId
       };
       currentMap.set(newTx.id, newTx);
+      index.byId.set(newTx.id, newTx);
+      if (newTx.llaveUnica) index.byLlaveUnica.set(newTx.llaveUnica, newTx);
       changedTxs.push(newTx);
       imported++;
     }
@@ -847,32 +945,39 @@ export async function uploadBankTransactions(
     if (fileBlob) {
       try {
         const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
-        const snapshot = await uploadBytes(storageRef, fileBlob);
+        const uploadTask = uploadBytes(storageRef, fileBlob);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Storage upload timeout')), 2500)
+        );
+        const snapshot = await Promise.race([uploadTask, timeoutPromise]);
         downloadUrl = await getDownloadURL(snapshot.ref);
       } catch (stgErr) {
-        console.warn("Firebase Storage upload skipped or failed, proceeding with db save:", stgErr);
+        console.warn("Firebase Storage upload skipped or timed out, proceeding with db save:", stgErr);
       }
     }
 
-    // Save modified or new transactions to Firestore in chunks of 500
+    // Save modified or new transactions to Firestore in chunks of 500 concurrently
     if (changedTxs.length > 0) {
       const chunks = [];
       for (let i = 0; i < changedTxs.length; i += 500) {
         chunks.push(changedTxs.slice(i, i + 500));
       }
-      for (const chunk of chunks) {
-        const bWrite = writeBatch(db);
-        chunk.forEach(tx => {
-          const cleanTx: Record<string, any> = {};
-          for (const [key, value] of Object.entries(tx)) {
-            if (value !== undefined) {
-              cleanTx[key] = value;
+
+      await Promise.all(
+        chunks.map(async (chunk) => {
+          const bWrite = writeBatch(db);
+          chunk.forEach(tx => {
+            const cleanTx: Record<string, any> = {};
+            for (const [key, value] of Object.entries(tx)) {
+              if (value !== undefined) {
+                cleanTx[key] = value;
+              }
             }
-          }
-          bWrite.set(doc(db, 'transactions', tx.id), cleanTx, { merge: true });
-        });
-        await bWrite.commit();
-      }
+            bWrite.set(doc(db, 'transactions', tx.id), cleanTx, { merge: true });
+          });
+          return bWrite.commit();
+        })
+      );
     }
 
     // Save batch record to Firestore
@@ -969,7 +1074,8 @@ export function identifyTransaction(
   tipoDocumento: 'Recibo' | 'Remisión' | 'Ignorado',
   cajeraName: string,
   nroReciboCaja?: string | null,
-  justificacionIgnorado?: string | null
+  justificacionIgnorado?: string | null,
+  customFechaIdentificacion?: string | null
 ): boolean {
   const current = getTransactions();
   const idx = current.findIndex(tx => tx.id === id);
@@ -977,10 +1083,21 @@ export function identifyTransaction(
 
   if (current[idx].identificada) return false;
 
+  let finalFechaIdent = getColombiaDateTime().dateTimeStr;
+  if (customFechaIdentificacion && customFechaIdentificacion.trim() !== '') {
+    const cleanDate = customFechaIdentificacion.trim();
+    if (cleanDate.length === 10) {
+      const timePart = getColombiaDateTime().dateTimeStr.slice(11);
+      finalFechaIdent = `${cleanDate} ${timePart}`;
+    } else {
+      finalFechaIdent = cleanDate;
+    }
+  }
+
   const updatedTx = {
     ...current[idx],
     identificada: true,
-    fechaIdentificacion: getColombiaDateTime().dateTimeStr,
+    fechaIdentificacion: finalFechaIdent,
     usuarioIdentificacion: cajeraName,
     asesor: tipoDocumento === 'Ignorado' ? null : (asesor || null),
     tipoDocumento,
@@ -990,7 +1107,7 @@ export function identifyTransaction(
 
   current[idx] = updatedTx;
 
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
   setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
@@ -1001,8 +1118,45 @@ export function identifyTransaction(
     cajeraName,
     tipoDocumento === 'Ignorado' ? 'Pago Ignorado' : 'Validación de Pago',
     tipoDocumento === 'Ignorado'
-      ? `Ignoró transacción ${updatedTx.llaveUnica.slice(0, 15)}... - Razón: ${justificacionIgnorado}`
-      : `Identificó transacción ${updatedTx.llaveUnica.slice(0, 15)}... como ${tipoDocumento} - Asesor: ${asesor || 'No especificado'}`
+      ? `Ignoró transacción ${updatedTx.llaveUnica.slice(0, 15)}... - Razón: ${justificacionIgnorado} (Fecha Validación: ${finalFechaIdent.slice(0, 10)})`
+      : `Identificó transacción ${updatedTx.llaveUnica.slice(0, 15)}... como ${tipoDocumento} - Asesor: ${asesor || 'No especificado'} (Fecha Validación: ${finalFechaIdent.slice(0, 10)})`
+  );
+
+  return true;
+}
+
+export function updateTransactionFechaIdentificacion(
+  id: string,
+  newFechaDate: string,
+  adminName: string
+): boolean {
+  const current = getTransactions();
+  const idx = current.findIndex(tx => tx.id === id);
+  if (idx === -1) return false;
+
+  const currentTime = current[idx].fechaIdentificacion
+    ? current[idx].fechaIdentificacion!.slice(11)
+    : getColombiaDateTime().dateTimeStr.slice(11);
+
+  const finalFechaIdent = `${newFechaDate} ${currentTime || '12:00:00'}`;
+
+  const updatedTx = {
+    ...current[idx],
+    fechaIdentificacion: finalFechaIdent
+  };
+
+  current[idx] = updatedTx;
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
+  notifyListeners();
+
+  setDoc(doc(db, 'transactions', id), updatedTx, { merge: true }).catch(err => {
+    console.error("Error updating fechaIdentificacion in Firestore:", err);
+  });
+
+  addAuditLog(
+    adminName,
+    'Modificación Fecha Validación',
+    `Cambió fecha de validación de transacción ${updatedTx.llaveUnica.slice(0, 15)}... a ${newFechaDate}`
   );
 
   return true;

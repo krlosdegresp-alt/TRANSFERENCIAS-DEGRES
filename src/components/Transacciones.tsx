@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   getTransactions, 
   identifyTransaction, 
+  updateTransactionFechaIdentificacion,
   revertIdentification, 
   getAdvisors, 
   getCierresCaja, 
@@ -35,7 +36,8 @@ import {
   XCircle,
   AlertTriangle,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Calendar
 } from 'lucide-react';
 
 interface TransaccionesProps {
@@ -67,6 +69,11 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const [docType, setDocType] = useState<'Recibo' | 'Remisión' | 'Ignorado'>('Remisión');
   const [justificacion, setJustificacion] = useState('');
   const [nroReciboCaja, setNroReciboCaja] = useState('');
+  const [customFechaIdentificacion, setCustomFechaIdentificacion] = useState<string>('');
+
+  // Editing validation date for existing identified transactions
+  const [editingDateTxId, setEditingDateTxId] = useState<string | null>(null);
+  const [editingNewDate, setEditingNewDate] = useState<string>('');
 
   // States for cashier requesting change/unlock
   const [requestChangeTxId, setRequestChangeTxId] = useState<string | null>(null);
@@ -193,15 +200,19 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     setDocType('Remisión');
     setJustificacion('');
     setNroReciboCaja('');
+    setCustomFechaIdentificacion(getColombiaDateTime().dateStr);
   };
 
   const handleConfirmIdentification = (id: string) => {
+    const isPrivileged = currentUser.role === 'Admin' || currentUser.role === 'Tesorera';
+    const dateToPass = isPrivileged ? customFechaIdentificacion : null;
+
     if (docType === 'Ignorado') {
       if (!justificacion || justificacion.trim() === '') {
         alert('Por favor proporcione o seleccione una justificación de por qué desea ignorar este pago.');
         return;
       }
-      const success = identifyTransaction(id, null, 'Ignorado', currentUser.nombre, null, justificacion);
+      const success = identifyTransaction(id, null, 'Ignorado', currentUser.nombre, null, justificacion, dateToPass);
       if (success) {
         setActiveEditingId(null);
         onRefreshData();
@@ -213,7 +224,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
         alert('Por favor seleccione un asesor responsable.');
         return;
       }
-      const success = identifyTransaction(id, selectedAdvisor, docType, currentUser.nombre);
+      const success = identifyTransaction(id, selectedAdvisor, docType, currentUser.nombre, null, null, dateToPass);
       if (success) {
         setActiveEditingId(null);
         onRefreshData();
@@ -875,6 +886,25 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                               </div>
                             )}
 
+                            {/* Privilege date override control for Admin/Tesorería */}
+                            {(currentUser.role === 'Admin' || currentUser.role === 'Tesorera') && (
+                              <div className="bg-amber-50/90 p-2 rounded-md border border-amber-200 space-y-1 my-1.5 animate-in fade-in duration-200">
+                                <label className="block text-[10px] font-bold text-amber-900 flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 text-amber-700" />
+                                  Fecha de Cierre / Validación:
+                                </label>
+                                <input
+                                  type="date"
+                                  value={customFechaIdentificacion}
+                                  onChange={(e) => setCustomFechaIdentificacion(e.target.value)}
+                                  className="w-full text-[11px] p-1.5 border border-amber-300 rounded font-bold bg-white text-slate-800 focus:outline-none focus:border-amber-600"
+                                />
+                                <p className="text-[8.5px] text-amber-800 leading-tight font-medium">
+                                  Permite validar con la fecha de ayer o antier para ajustar cierres de caja.
+                                </p>
+                              </div>
+                            )}
+
                             <div className="flex gap-2 pt-1.5 border-t border-slate-200">
                               <button
                                 id={`btn-cancel-ident-${tx.id}`}
@@ -937,10 +967,57 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                             {/* Revert and Change Request controls */}
                             {currentUser.role === 'Admin' || currentUser.role === 'Tesorera' ? (
                               <div className="space-y-1.5">
+                                {editingDateTxId === tx.id ? (
+                                  <div className="bg-amber-50 p-2 rounded-lg border border-amber-300 space-y-1.5 animate-in fade-in duration-200">
+                                    <label className="block text-[9.5px] font-bold text-amber-900 flex items-center gap-1">
+                                      <Calendar className="h-3 w-3 text-amber-700" />
+                                      Nueva Fecha Validación:
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={editingNewDate}
+                                      onChange={(e) => setEditingNewDate(e.target.value)}
+                                      className="w-full text-[10px] p-1 border border-amber-400 rounded bg-white font-bold text-slate-800 focus:outline-none focus:border-amber-600"
+                                    />
+                                    <div className="flex gap-1 pt-1">
+                                      <button
+                                        onClick={() => {
+                                          if (editingNewDate) {
+                                            updateTransactionFechaIdentificacion(tx.id, editingNewDate, currentUser.nombre);
+                                            setEditingDateTxId(null);
+                                            onRefreshData();
+                                          }
+                                        }}
+                                        className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-[9px] py-1 rounded font-bold transition-colors cursor-pointer"
+                                      >
+                                        Guardar
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingDateTxId(null)}
+                                        className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[9px] py-1 rounded font-bold transition-colors cursor-pointer"
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    id={`btn-edit-date-tx-${tx.id}`}
+                                    onClick={() => {
+                                      setEditingDateTxId(tx.id);
+                                      setEditingNewDate(tx.fechaIdentificacion ? tx.fechaIdentificacion.slice(0, 10) : getColombiaDateTime().dateStr);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-1 py-1 text-[9px] text-amber-800 bg-amber-50/80 border border-amber-200 hover:bg-amber-100 font-bold rounded transition-colors cursor-pointer"
+                                  >
+                                    <Calendar className="h-2.5 w-2.5 text-amber-600" />
+                                    Cambiar Fecha Validación (Admin)
+                                  </button>
+                                )}
+
                                 <button
                                   id={`btn-revert-tx-${tx.id}`}
                                   onClick={() => handleRevert(tx.id)}
-                                  className="w-full mt-1.5 flex items-center justify-center gap-1.5 py-1 text-[9px] bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold rounded transition-colors cursor-pointer"
+                                  className="w-full flex items-center justify-center gap-1.5 py-1 text-[9px] bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold rounded transition-colors cursor-pointer"
                                 >
                                   <Undo2 className="h-2.5 w-2.5" />
                                   Revertir Validación (Admin/Tesorera)
