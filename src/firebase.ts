@@ -15,6 +15,7 @@ import {
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall, ReportConfig, SystemConfig } from './types';
 import { getColombiaDateTime } from './utils/formato';
+import { isRealComprobante } from './utils/llave-unica';
 
 // Firebase configuration from firebase-applet-config.json
 const firebaseConfig = {
@@ -636,6 +637,12 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
     return true;
   }
 
+  // If both transactions have distinct non-empty unique keys (e.g. occurrence index suffix _o1 vs _o0, or different hashes/descriptions),
+  // they represent guaranteed separate row entries from the bank statement!
+  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica !== tx2.llaveUnica) {
+    return false;
+  }
+
   // 2. Value matching (within $0.01 COP tolerance)
   const sameValor = Math.abs((tx1.valor || 0) - (tx2.valor || 0)) < 0.01;
   if (!sameValor) return false;
@@ -649,26 +656,23 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
 
   if (!sameAccount) return false;
 
-  // 4. Non-empty Comprobante / Voucher check
-  const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  // 4. Real Genuine Comprobante check (only genuine bank voucher numbers, rejecting 000000/999999/dummy codes)
+  const isReal1 = isRealComprobante(tx1.comprobante);
+  const isReal2 = isRealComprobante(tx2.comprobante);
 
-  if (normComp1 && normComp2 && normComp1.length >= 2 && normComp2.length >= 2) {
+  if (isReal1 && isReal2) {
+    const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     if (normComp1 === normComp2) {
-      return true; // 100% same payment voucher!
+      if (tx1.fecha === tx2.fecha) {
+        return true; // 100% same payment voucher on the same date!
+      }
     } else {
       return false; // DIFFERENT vouchers = DIFFERENT payments!
     }
   }
 
-  // 5. Occurrence index or unique keys:
-  // If both transactions have distinct llaveUnica (e.g. occurrence index suffix _o1 vs _o0),
-  // they represent separate row entries in the bank statement!
-  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica !== tx2.llaveUnica) {
-    return false;
-  }
-
-  // 6. Time check (if both have non-empty time, e.g. "10:15:30" vs "10:28:10")
+  // 5. Time check (if both have recorded distinct times, e.g. "12:15:20" vs "17:05:42")
   const normHora1 = (tx1.hora || '').trim().replace(/[:]/g, '');
   const normHora2 = (tx2.hora || '').trim().replace(/[:]/g, '');
   if (normHora1 && normHora2 && normHora1 !== '120000' && normHora2 !== '120000') {
@@ -677,30 +681,16 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
     }
   }
 
-  // 7. Description & Date matching (legacy fallback when llaveUnica is missing)
-  const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // 6. Description & Date matching (legacy fallback only when llaveUnica is missing on at least one transaction)
+  if (!tx1.llaveUnica || !tx2.llaveUnica) {
+    const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  const sameDesc = normDesc1.length > 3 && normDesc2.length > 3 && 
-                   (normDesc1 === normDesc2 || normDesc1.includes(normDesc2) || normDesc2.includes(normDesc1));
+    const sameDesc = normDesc1.length > 3 && normDesc2.length > 3 && 
+                     (normDesc1 === normDesc2);
 
-  if (sameDesc) {
-    // Exact date match
-    if (tx1.fecha === tx2.fecha) {
-      if (!tx1.llaveUnica || !tx2.llaveUnica) {
-        return true;
-      }
-    }
-
-    // Day/Month inversion match (e.g. 2026-05-08 vs 2026-08-05)
-    if (tx1.fecha && tx2.fecha) {
-      const p1 = tx1.fecha.split('-');
-      const p2 = tx2.fecha.split('-');
-      if (p1.length === 3 && p2.length === 3) {
-        if (p1[0] === p2[0] && p1[1] === p2[2] && p1[2] === p2[1]) {
-          return true; // Day/Month swapped date defect!
-        }
-      }
+    if (sameDesc && tx1.fecha === tx2.fecha) {
+      return true;
     }
   }
 
@@ -727,11 +717,13 @@ function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
     if (tx.id) index.byId.set(tx.id, tx);
     if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
 
-    const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normComp && normComp.length >= 2) {
+    // Only index genuinely unique bank vouchers (never generic 000000/999999/dummy codes)
+    if (isRealComprobante(tx.comprobante)) {
+      const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
       const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
       const normVal = Math.round(tx.valor || 0);
-      index.byComprobante.set(`${normCta}_${normVal}_${normComp}`, tx);
+      const normFec = (tx.fecha || '').replace(/[-/]/g, '');
+      index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
     }
 
     const valKey = Math.round(tx.valor || 0);
@@ -747,28 +739,29 @@ function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
 }
 
 function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex): Transaction | null {
-  // 1. Check ID
+  // 1. Check exact ID
   if (tx.id && index.byId.has(tx.id)) {
     return index.byId.get(tx.id)!;
   }
 
-  // 2. Check LlaveUnica
+  // 2. Check exact LlaveUnica
   if (tx.llaveUnica && index.byLlaveUnica.has(tx.llaveUnica)) {
     return index.byLlaveUnica.get(tx.llaveUnica)!;
   }
 
-  // 3. Check Comprobante + Account + Valor
-  const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (normComp && normComp.length >= 2) {
+  // 3. Check Genuine Comprobante + Account + Date + Valor (only if real voucher exists)
+  if (isRealComprobante(tx.comprobante)) {
+    const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
     const normVal = Math.round(tx.valor || 0);
-    const compKey = `${normCta}_${normVal}_${normComp}`;
+    const normFec = (tx.fecha || '').replace(/[-/]/g, '');
+    const compKey = `${normCta}_${normFec}_${normVal}_${normComp}`;
     if (index.byComprobante.has(compKey)) {
       return index.byComprobante.get(compKey)!;
     }
   }
 
-  // 4. Fast Fallback: Check candidate transactions sharing the exact rounded monetary amount
+  // 4. Fallback: Check candidate transactions sharing the exact rounded monetary amount
   const valKey = Math.round(tx.valor || 0);
   const candidates = index.byValor.get(valKey);
   if (candidates && candidates.length > 0) {
@@ -817,11 +810,12 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
       cleaned.push(tx);
       if (tx.id) index.byId.set(tx.id, tx);
       if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
-      const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (normComp && normComp.length >= 2) {
+      if (isRealComprobante(tx.comprobante)) {
+        const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
         const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
         const normVal = Math.round(tx.valor || 0);
-        index.byComprobante.set(`${normCta}_${normVal}_${normComp}`, tx);
+        const normFec = (tx.fecha || '').replace(/[-/]/g, '');
+        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
       }
       const valKey = Math.round(tx.valor || 0);
       const group = index.byValor.get(valKey);

@@ -547,7 +547,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       );
 
       if (countTxs === 0 && countCierres === 0) {
-        triggerAlert('Sin Datos en el Rango', 'No se encontraron transacciones ni cierres de caja en el rango de fechas/filtros seleccionados.', 'warning');
+        triggerAlert('Sin Datos en el Rango', 'No se encontraron transacciones ni cierres de caja en el rango de fechas/filtros seleccionados.', 'info');
         return;
       }
 
@@ -673,7 +673,7 @@ export default function AdminPanel({ currentUser, transactions, onRefreshData }:
       '¿Desea ejecutar la LIMPIEZA MENSUAL del sistema?\n\nEsto descargará un archivo excel histórico con todas las transacciones y cierres de caja, y luego archivará las transacciones para que no entren en conflicto con el mes entrante.',
       () => {
         try {
-          const workbook = generateBackupWorkbook();
+          const { workbook } = generateBackupWorkbook();
           const dateStr = getColombiaDateTime().dateStr;
           XLSX.writeFile(workbook, `Historico_Transferencias_Cierre_${dateStr}.xlsx`);
 

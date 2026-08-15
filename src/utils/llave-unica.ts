@@ -1,8 +1,36 @@
 /**
+ * Checks whether a comprobante string is a genuine, unique bank voucher number
+ * and not a generic placeholder/dummy code (such as '000000', '999999', '0', 'N/A', etc.).
+ */
+export function isRealComprobante(comp?: string | null): boolean {
+  if (!comp) return false;
+  const str = String(comp).trim();
+  if (str.length < 2) return false;
+  
+  const clean = str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (clean.length < 2) return false;
+
+  // Reject repeating single character digits (e.g. "000000", "00", "000", "999999", "111111", "999")
+  if (/^(\d)\1+$/.test(clean)) return false;
+
+  // Reject generic / placeholder strings commonly emitted by bank exports
+  const invalidDummies = [
+    'none', 'null', 'undefined', 'ninguno', 'ninguna', 'na', 'sinref',
+    'sincomprobante', 'noaplica', 'notavailable', 'desconocido', 'desconocida',
+    'comprobante', 'documento', 'referencia', 'transaccion', 'transferencia',
+    'qr', 'cobru', 'ach', 'aut', '0001', '00001', '000001', '0', '00', '000'
+  ];
+  if (invalidDummies.includes(clean)) return false;
+
+  return true;
+}
+
+/**
  * Generates a unique stable key for a transaction based on its essential fields:
- * Account + Date + Time + Value + Description + Optional Comprobante.
+ * Account + Date + Time + Value + Description + Optional Genuine Comprobante.
  * This guarantees that even if a bank file is uploaded multiple times or has date overlaps,
- * duplicate rows are rejected.
+ * duplicate rows are rejected while multiple distinct transfers (e.g. 2 QR payments of identical amount)
+ * are preserved 100% accurately.
  */
 export function generarLlaveUnica(
   cuenta: string,
@@ -24,6 +52,9 @@ export function generarLlaveUnica(
   let normHora = (hora || '').trim().toLowerCase();
   normHora = normHora.replace(/[:]/g, '');
   normHora = normHora.replace(/\s+/g, '');
+  if (normHora === '120000') {
+    normHora = '';
+  }
 
   // Normalize value to 2 decimal places to capture Colombian cents/decimals properly
   // and replace the dot with underscore to keep the key stable as a CSS/JS identifier.
@@ -33,24 +64,23 @@ export function generarLlaveUnica(
   const normDesc = (descripcion || '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
-    .substring(0, 30); // Grab first 30 chars of alphanumeric content
-
-  // Normalize comprobante if present
-  const normComprobante = (comprobante || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+    .substring(0, 35); // Grab first 35 chars of alphanumeric content
 
   // Suffix for occurrence index (only if index > 0)
   const ocurSuffix = (ocurr_idx !== undefined && ocurr_idx > 0) ? `_o${ocurr_idx}` : '';
 
-  // If we have a stable bank comprobante numeric/alphanumeric ID (length >= 3),
-  // use Account + Value + Comprobante as the primary unique key.
-  // This guarantees that whether a bank extract lists posting date (e.g. 06 AGO) or
-  // transaction date (e.g. 29 JUL), or DD/MM vs MM/DD date variations, the key is 100% IDENTICAL.
+  // Check if we have a real genuine bank comprobante
+  const isValidComp = isRealComprobante(comprobante);
+  const normComprobante = isValidComp
+    ? (comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+    : '';
+
+  // If we have a stable real bank comprobante numeric/alphanumeric ID (length >= 3),
+  // include account, date, value, comprobante and occurrence suffix.
   if (normComprobante && normComprobante.length >= 3) {
-    return `tx_${normCuenta}_v${normValor}_c${normComprobante}${ocurSuffix}`;
+    return `tx_${normCuenta}_${normFecha}_v${normValor}_c${normComprobante}${ocurSuffix}`;
   }
 
-  return `tx_${normCuenta}_${normFecha}_${normHora}_v${normValor}_${normDesc}${ocurSuffix}`;
+  const horaPart = normHora ? `_${normHora}` : '';
+  return `tx_${normCuenta}_${normFecha}${horaPart}_v${normValor}_${normDesc}${ocurSuffix}`;
 }
