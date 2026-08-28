@@ -650,30 +650,8 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
     return true;
   }
 
-  // 3. If BOTH transactions have distinct unique keys or IDs, they represent separate rows/occurrences in the bank statements!
-  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica !== tx2.llaveUnica) {
-    return false;
-  }
-  if (tx1.id && tx2.id && tx1.id !== tx2.id) {
-    return false;
-  }
-
-  // 4. Real Genuine Comprobante / Voucher check
-  const isReal1 = isRealComprobante(tx1.comprobante);
-  const isReal2 = isRealComprobante(tx2.comprobante);
-
-  if (isReal1 && isReal2) {
-    const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const sameValor = Math.abs((tx1.valor || 0) - (tx2.valor || 0)) < 0.01;
-    if (normComp1 === normComp2 && tx1.fecha === tx2.fecha && sameValor) {
-      return true; // Exact same payment voucher on the same date and amount!
-    }
-    return false; // Different genuine vouchers = DIFFERENT payments!
-  }
-
   // Under no other conditions should we assume two transactions are duplicates.
-  // Multiple distinct payments can occur on the same date for the same client and amount (e.g. daily limit transfers or multiple QR payments).
+  // Each row in the bank statement represents a real and distinct transfer/payment.
   return false;
 }
 
@@ -681,28 +659,17 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
 interface TransactionIndex {
   byId: Map<string, Transaction>;
   byLlaveUnica: Map<string, Transaction>;
-  byComprobante: Map<string, Transaction>;
 }
 
 function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
   const index: TransactionIndex = {
     byId: new Map(),
-    byLlaveUnica: new Map(),
-    byComprobante: new Map()
+    byLlaveUnica: new Map()
   };
 
   for (const tx of txs) {
     if (tx.id) index.byId.set(tx.id, tx);
     if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
-
-    // Only index genuinely unique bank vouchers (never generic 000000/999999/dummy codes)
-    if (isRealComprobante(tx.comprobante)) {
-      const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
-      const normVal = Math.round(tx.valor || 0);
-      const normFec = (tx.fecha || '').replace(/[-/]/g, '');
-      index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
-    }
   }
 
   return index;
@@ -717,18 +684,6 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
   // 2. Check exact LlaveUnica
   if (tx.llaveUnica && index.byLlaveUnica.has(tx.llaveUnica)) {
     return index.byLlaveUnica.get(tx.llaveUnica)!;
-  }
-
-  // 3. Check Genuine Comprobante + Account + Date + Valor (only if real voucher exists)
-  if (isRealComprobante(tx.comprobante)) {
-    const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
-    const normVal = Math.round(tx.valor || 0);
-    const normFec = (tx.fecha || '').replace(/[-/]/g, '');
-    const compKey = `${normCta}_${normFec}_${normVal}_${normComp}`;
-    if (index.byComprobante.has(compKey)) {
-      return index.byComprobante.get(compKey)!;
-    }
   }
 
   return null;
@@ -775,24 +730,10 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
 
       index.byId.set(merged.id, merged);
       if (merged.llaveUnica) index.byLlaveUnica.set(merged.llaveUnica, merged);
-      if (isRealComprobante(merged.comprobante)) {
-        const normComp = (merged.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const normCta = (merged.cuenta || '').replace(/\D/g, '').slice(-4);
-        const normVal = Math.round(merged.valor || 0);
-        const normFec = (merged.fecha || '').replace(/[-/]/g, '');
-        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, merged);
-      }
     } else {
       cleaned.push(tx);
       if (tx.id) index.byId.set(tx.id, tx);
       if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
-      if (isRealComprobante(tx.comprobante)) {
-        const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
-        const normVal = Math.round(tx.valor || 0);
-        const normFec = (tx.fecha || '').replace(/[-/]/g, '');
-        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
-      }
     }
   }
 
@@ -880,13 +821,6 @@ export async function uploadBankTransactions(
       currentMap.set(existingTx.id, updatedTx);
       index.byId.set(updatedTx.id, updatedTx);
       if (updatedTx.llaveUnica) index.byLlaveUnica.set(updatedTx.llaveUnica, updatedTx);
-      if (isRealComprobante(updatedTx.comprobante)) {
-        const normComp = (updatedTx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const normCta = (updatedTx.cuenta || '').replace(/\D/g, '').slice(-4);
-        const normVal = Math.round(updatedTx.valor || 0);
-        const normFec = (updatedTx.fecha || '').replace(/[-/]/g, '');
-        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, updatedTx);
-      }
       changedTxs.push(updatedTx);
     } else {
       const newTx = {
@@ -896,13 +830,6 @@ export async function uploadBankTransactions(
       currentMap.set(newTx.id, newTx);
       index.byId.set(newTx.id, newTx);
       if (newTx.llaveUnica) index.byLlaveUnica.set(newTx.llaveUnica, newTx);
-      if (isRealComprobante(newTx.comprobante)) {
-        const normComp = (newTx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const normCta = (newTx.cuenta || '').replace(/\D/g, '').slice(-4);
-        const normVal = Math.round(newTx.valor || 0);
-        const normFec = (newTx.fecha || '').replace(/[-/]/g, '');
-        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, newTx);
-      }
       changedTxs.push(newTx);
       imported++;
     }
