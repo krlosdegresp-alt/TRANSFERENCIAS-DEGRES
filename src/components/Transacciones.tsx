@@ -834,12 +834,20 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
 
                             {docType === 'Ignorado' ? (
                               <div className="space-y-1.5 animate-in slide-in-from-top-1 duration-200">
-                                <label className="block text-[10px] font-bold text-rose-800 mb-0.5">Motivo de Descarte *:</label>
+                                <label className="block text-[10px] font-bold text-rose-800 mb-0.5">Motivo de Descarte / Ignorar *:</label>
                                 <select
                                   id={`select-reason-${tx.id}`}
                                   value={
-                                    ['Pagado directamente en la caja por QR', 'Pagado directamente en la caja con Transferencia', 'Pagado directamente en la caja con tarjeta'].includes(justificacion)
-                                      ? (justificacion === 'Pagado directamente en la caja con tarjeta' ? 'Pagado directamente en la caja con Transferencia' : justificacion)
+                                    [
+                                      'Se pagó directamente en caja por QR',
+                                      'Pagado directamente en la caja por QR',
+                                      'Se pagó directamente en caja con Transferencia',
+                                      'Pagado directamente en la caja con Transferencia',
+                                      'Se pagó directamente en caja con tarjeta / datáfono',
+                                      'Pago duplicado o no corresponde a esta sede'
+                                    ].includes(justificacion)
+                                      ? (justificacion === 'Pagado directamente en la caja por QR' ? 'Se pagó directamente en caja por QR' :
+                                         justificacion === 'Pagado directamente en la caja con Transferencia' ? 'Se pagó directamente en caja con Transferencia' : justificacion)
                                       : (justificacion ? 'Otro' : '')
                                   }
                                   onChange={(e) => {
@@ -853,12 +861,21 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                                   className="w-full border border-slate-200 rounded p-1.5 text-[11px] bg-white font-bold text-slate-700 focus:outline-none focus:border-rose-600"
                                 >
                                   <option value="">-- Seleccionar Motivo --</option>
-                                  <option value="Pagado directamente en la caja por QR">Se pagó directamente en caja por QR</option>
-                                  <option value="Pagado directamente en la caja con Transferencia">Se pagó directamente en caja con Transferencia</option>
+                                  <option value="Se pagó directamente en caja por QR">Se pagó directamente en caja por QR</option>
+                                  <option value="Se pagó directamente en caja con Transferencia">Se pagó directamente en caja con Transferencia</option>
+                                  <option value="Se pagó directamente en caja con tarjeta / datáfono">Se pagó directamente en caja con tarjeta / datáfono</option>
+                                  <option value="Pago duplicado o no corresponde a esta sede">Pago duplicado o no corresponde a esta sede</option>
                                   <option value="Otro">Otro (Escribir justificación...)</option>
                                 </select>
                                 
-                                {(!['Pagado directamente en la caja por QR', 'Pagado directamente en la caja con Transferencia', 'Pagado directamente en la caja con tarjeta'].includes(justificacion) || justificacion === '') && (
+                                {(![
+                                  'Se pagó directamente en caja por QR',
+                                  'Pagado directamente en la caja por QR',
+                                  'Se pagó directamente en caja con Transferencia',
+                                  'Pagado directamente en la caja con Transferencia',
+                                  'Se pagó directamente en caja con tarjeta / datáfono',
+                                  'Pago duplicado o no corresponde a esta sede'
+                                ].includes(justificacion) || justificacion === '') && (
                                   <textarea
                                     placeholder="Ingresa la justificación obligatoria..."
                                     value={justificacion}

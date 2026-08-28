@@ -593,7 +593,7 @@ export function getTransactions(): Transaction[] {
   try {
     const list = JSON.parse(data) as Transaction[];
     if (Array.isArray(list)) {
-      return list.filter(t => !(t.id === 'tx_10172476807_20260828_v50400_00_c90516764_o1' && !t.batchId));
+      return list;
     }
     return [];
   } catch (e) {
@@ -1010,7 +1010,7 @@ export function identifyTransaction(
   customFechaIdentificacion?: string | null
 ): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id);
+  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
   if (idx === -1) return false;
 
   if (current[idx].identificada) return false;
@@ -1026,6 +1026,7 @@ export function identifyTransaction(
     }
   }
 
+  const targetId = current[idx].id;
   const updatedTx = {
     ...current[idx],
     identificada: true,
@@ -1042,7 +1043,7 @@ export function identifyTransaction(
   safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
     console.error("Error identifying transaction in Firestore:", err);
   });
 
@@ -1063,9 +1064,10 @@ export function updateTransactionFechaIdentificacion(
   adminName: string
 ): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id);
+  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
   if (idx === -1) return false;
 
+  const targetId = current[idx].id;
   const currentTime = current[idx].fechaIdentificacion
     ? current[idx].fechaIdentificacion!.slice(11)
     : getColombiaDateTime().dateTimeStr.slice(11);
@@ -1081,7 +1083,7 @@ export function updateTransactionFechaIdentificacion(
   safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', id), updatedTx, { merge: true }).catch(err => {
+  setDoc(doc(db, 'transactions', targetId), updatedTx, { merge: true }).catch(err => {
     console.error("Error updating fechaIdentificacion in Firestore:", err);
   });
 
@@ -1096,9 +1098,10 @@ export function updateTransactionFechaIdentificacion(
 
 export function revertIdentification(id: string, adminName: string, adminRole: string = 'Admin'): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id);
+  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
   if (idx === -1) return false;
 
+  const targetId = current[idx].id;
   const originalDoc = current[idx].tipoDocumento;
   const originalAsesor = current[idx].asesor;
 
@@ -1121,17 +1124,17 @@ export function revertIdentification(id: string, adminName: string, adminRole: s
 
   current[idx] = updatedTx;
 
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
     console.error("Error reverting identification in Firestore:", err);
   });
 
   addAuditLog(
     adminName,
     'Reversión de Identificación',
-    `Revirtió transacción ${id.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor}) por ${adminRole}`
+    `Revirtió transacción ${targetId.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor}) por ${adminRole}`
   );
 
   return true;
@@ -1139,9 +1142,10 @@ export function revertIdentification(id: string, adminName: string, adminRole: s
 
 export function requestTransactionChange(id: string, user: User, reason: string): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id);
+  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
   if (idx === -1) return false;
 
+  const targetId = current[idx].id;
   const updatedTx = {
     ...current[idx],
     solicitudCambio: 'pendiente' as const,
@@ -1152,21 +1156,21 @@ export function requestTransactionChange(id: string, user: User, reason: string)
 
   current[idx] = updatedTx;
 
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
     console.error("Error requesting transaction change in Firestore:", err);
   });
 
   addAuditLog(
     user.nombre,
     'Solicitud de Cambio',
-    `Solicitó cambio/liberación para la transacción ${id.slice(-8).toUpperCase()} - Motivo: ${reason}`
+    `Solicitó cambio/liberación para la transacción ${targetId.slice(-8).toUpperCase()} - Motivo: ${reason}`
   );
 
   // Send automatic chat message to 'general' so both cashier and admin see it in the general chat
-  const msgText = `[REVERSION_PENDIENTE] Solicitud de Reversión\n• Colaborador: ${user.nombre}\n• Transacción: ${updatedTx.llaveUnica.slice(-12).toUpperCase()}\n• Valor: $${updatedTx.valor.toLocaleString()}\n• Sede: ${updatedTx.sede}\n• Motivo: "${reason}"\n• TxId: ${id}`;
+  const msgText = `[REVERSION_PENDIENTE] Solicitud de Reversión\n• Colaborador: ${user.nombre}\n• Transacción: ${updatedTx.llaveUnica.slice(-12).toUpperCase()}\n• Valor: $${updatedTx.valor.toLocaleString()}\n• Sede: ${updatedTx.sede}\n• Motivo: "${reason}"\n• TxId: ${targetId}`;
   
   sendChatMessage(
     user.id,
@@ -1191,9 +1195,10 @@ export function resolveTransactionChange(
   adminRole: string = 'Admin'
 ): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id);
+  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
   if (idx === -1) return false;
 
+  const targetId = current[idx].id;
   let updatedTx = { ...current[idx] };
 
   if (resolution === 'liberar') {
@@ -1215,7 +1220,7 @@ export function resolveTransactionChange(
     addAuditLog(
       adminName,
       'Liberación de Transacción',
-      `Aprobó liberación de transacción ${id.slice(-8).toUpperCase()} solicitada por ${updatedTx.solicitudUsuario} (${adminRole})`
+      `Aprobó liberación de transacción ${targetId.slice(-8).toUpperCase()} solicitada por ${updatedTx.solicitudUsuario} (${adminRole})`
     );
   } else {
     updatedTx = {
@@ -1232,16 +1237,16 @@ export function resolveTransactionChange(
     addAuditLog(
       adminName,
       'Corrección de Transacción',
-      `Corrigió directamente la transacción ${id.slice(-8).toUpperCase()} - Nuevo Doc: ${fields?.tipoDocumento}, Asesor: ${fields?.asesor || 'N/A'}`
+      `Corrigió directamente la transacción ${targetId.slice(-8).toUpperCase()} - Nuevo Doc: ${fields?.tipoDocumento}, Asesor: ${fields?.asesor || 'N/A'}`
     );
   }
 
   current[idx] = updatedTx;
 
-  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
+  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
     console.error("Error resolving transaction change in Firestore:", err);
   });
 
