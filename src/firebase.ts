@@ -406,8 +406,91 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Start listeners immediately on import
-initializeRealtimeListeners();
+// ONE-TIME EMERGENCY MIGRATION: copy this browser's cached data into
+// TRANSFERENCIAS TEMP before empty Firestore snapshots can overwrite local cache.
+const TEMP_CACHE_MIGRATION_MARKER = 'temp_firestore_cache_migrated_2026_08_28_v2';
+
+async function migrateLocalCacheToTempFirestore() {
+  if (typeof window === 'undefined') return;
+  if (localStorage.getItem(TEMP_CACHE_MIGRATION_MARKER) === 'done') return;
+
+  const cleanObject = (obj: any) => {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  };
+
+  const writeArrayInChunks = async (collectionName: string, items: any[]) => {
+    const valid = items.filter(x => x && x.id);
+    for (let i = 0; i < valid.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const item of valid.slice(i, i + 400)) {
+        batch.set(doc(db, collectionName, String(item.id)), cleanObject(item));
+      }
+      await batch.commit();
+    }
+    return valid.length;
+  };
+
+  try {
+    console.log('[TEMP MIGRATION] Starting local cache -> Firestore migration...');
+
+    const mappings = [
+      [STORAGE_USERS_KEY, 'users'],
+      [STORAGE_TRANS_KEY, 'transactions'],
+      [STORAGE_BATCHES_KEY, 'batches'],
+      [STORAGE_CIERRES_KEY, 'cierres'],
+      [STORAGE_LOGS_KEY, 'logs'],
+      [STORAGE_CHAT_KEY, 'chat'],
+      [STORAGE_VIDEOCALLS_KEY, 'videocalls'],
+    ] as const;
+
+    let total = 0;
+    for (const [storageKey, collectionName] of mappings) {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const count = await writeArrayInChunks(collectionName, parsed);
+          total += count;
+          console.log(`[TEMP MIGRATION] ${collectionName}: ${count} documents uploaded.`);
+        }
+      } catch (e) {
+        console.warn(`[TEMP MIGRATION] Could not migrate ${collectionName}:`, e);
+      }
+    }
+
+    const reportRaw = localStorage.getItem(STORAGE_REPORT_CONFIG_KEY);
+    if (reportRaw) {
+      try {
+        await setDoc(doc(db, 'configs', 'reports'), cleanObject(JSON.parse(reportRaw)));
+        console.log('[TEMP MIGRATION] reports config uploaded.');
+      } catch (e) { console.warn('[TEMP MIGRATION] reports config failed:', e); }
+    }
+
+    const systemRaw = localStorage.getItem(STORAGE_SYSTEM_CONFIG_KEY);
+    if (systemRaw) {
+      try {
+        const cfg = cleanObject(JSON.parse(systemRaw));
+        cfg.maintenanceMode = false;
+        await setDoc(doc(db, 'configs', 'system'), cfg);
+        console.log('[TEMP MIGRATION] system config uploaded.');
+      } catch (e) { console.warn('[TEMP MIGRATION] system config failed:', e); }
+    }
+
+    localStorage.setItem(TEMP_CACHE_MIGRATION_MARKER, 'done');
+    console.log(`[TEMP MIGRATION] COMPLETE. ${total} cached documents uploaded to TRANSFERENCIAS TEMP.`);
+  } catch (error) {
+    console.error('[TEMP MIGRATION] FAILED. Local cache was NOT marked as migrated:', error);
+  }
+}
+
+// Important: migrate first; only then attach real-time listeners so an empty
+// temporary database cannot erase the useful cache in this browser.
+migrateLocalCacheToTempFirestore().finally(() => initializeRealtimeListeners());
 
 export function getSystemConfig(): SystemConfig {
   const data = localStorage.getItem(STORAGE_SYSTEM_CONFIG_KEY);
