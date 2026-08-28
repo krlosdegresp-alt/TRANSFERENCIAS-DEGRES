@@ -189,7 +189,22 @@ export function initializeRealtimeListeners() {
     });
 
     // Auto-deduplicate stored snapshot transactions
-    const { cleaned } = deduplicateTransactionList(txList);
+    const { cleaned, duplicateIdsToRemove } = deduplicateTransactionList(txList);
+
+    // Clean any redundant duplicate doc IDs from Firestore
+    if (duplicateIdsToRemove && duplicateIdsToRemove.length > 0) {
+      (async () => {
+        try {
+          const batch = writeBatch(db);
+          duplicateIdsToRemove.forEach(id => {
+            batch.delete(doc(db, 'transactions', id));
+          });
+          await batch.commit();
+        } catch (e) {
+          console.warn('Auto-cleanup duplicate documents warning:', e);
+        }
+      })();
+    }
 
     // Sort: latest dates first
     cleaned.sort((a, b) => {
@@ -637,17 +652,25 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
     return true;
   }
 
-  // If both transactions have distinct non-empty unique keys (e.g. occurrence index suffix _o1 vs _o0, or different hashes/descriptions),
-  // they represent guaranteed separate row entries from the bank statement!
-  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica !== tx2.llaveUnica) {
-    return false;
-  }
-
   // 2. Value matching (within $0.01 COP tolerance)
   const sameValor = Math.abs((tx1.valor || 0) - (tx2.valor || 0)) < 0.01;
   if (!sameValor) return false;
 
-  // 3. Account / Sede matching
+  // 3. Date matching
+  if (tx1.fecha !== tx2.fecha) {
+    // Check if it was day/month swapped (e.g. 2026-05-08 vs 2026-08-05)
+    let isSwapped = false;
+    if (tx1.fecha && tx2.fecha) {
+      const p1 = tx1.fecha.split('-');
+      const p2 = tx2.fecha.split('-');
+      if (p1.length === 3 && p2.length === 3 && p1[0] === p2[0] && p1[1] === p2[2] && p1[2] === p2[1]) {
+        isSwapped = true;
+      }
+    }
+    if (!isSwapped) return false;
+  }
+
+  // 4. Account / Sede matching
   const normCta1 = (tx1.cuenta || '').replace(/\D/g, '').slice(-4);
   const normCta2 = (tx2.cuenta || '').replace(/\D/g, '').slice(-4);
   const sameAccount = (normCta1 && normCta2 && normCta1 === normCta2) ||
@@ -656,23 +679,29 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
 
   if (!sameAccount) return false;
 
-  // 4. Real Genuine Comprobante check (only genuine bank voucher numbers, rejecting 000000/999999/dummy codes)
+  // 5. Check occurrence index within the SAME statement batch:
+  // If BOTH transactions have explicit occurrence indexes (e.g. _o1 vs _o2), they are separate occurrences.
+  const oMatch1 = (tx1.llaveUnica || '').match(/_o(\d+)$/);
+  const oMatch2 = (tx2.llaveUnica || '').match(/_o(\d+)$/);
+  if (oMatch1 && oMatch2 && oMatch1[1] !== oMatch2[1]) {
+    return false; // Different occurrence indices in the same statement file
+  }
+
+  // 6. Real Genuine Comprobante / Voucher check
+  // If BOTH have genuine bank voucher / comprobante numbers and they are DIFFERENT -> DIFFERENT payments!
+  // If ONE has a genuine comprobante and the OTHER has NO comprobante (or dummy), they ARE COMPATIBLE (merge/enrich)!
   const isReal1 = isRealComprobante(tx1.comprobante);
   const isReal2 = isRealComprobante(tx2.comprobante);
 
   if (isReal1 && isReal2) {
     const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normComp1 === normComp2) {
-      if (tx1.fecha === tx2.fecha) {
-        return true; // 100% same payment voucher on the same date!
-      }
-    } else {
-      return false; // DIFFERENT vouchers = DIFFERENT payments!
+    if (normComp1 !== normComp2) {
+      return false; // Different genuine vouchers = DIFFERENT payments!
     }
   }
 
-  // 5. Time check (if both have recorded distinct times, e.g. "12:15:20" vs "17:05:42")
+  // 7. Time check (if both have recorded distinct times, e.g. "12:15:20" vs "17:05:42")
   const normHora1 = (tx1.hora || '').trim().replace(/[:]/g, '');
   const normHora2 = (tx2.hora || '').trim().replace(/[:]/g, '');
   if (normHora1 && normHora2 && normHora1 !== '120000' && normHora2 !== '120000') {
@@ -681,20 +710,27 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
     }
   }
 
-  // 6. Description & Date matching (legacy fallback only when llaveUnica is missing on at least one transaction)
-  if (!tx1.llaveUnica || !tx2.llaveUnica) {
-    const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // 8. Oficina matching (if both have non-empty oficina specified)
+  const normOfi1 = (tx1.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normOfi2 = (tx2.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (normOfi1 && normOfi2 && normOfi1 !== normOfi2) {
+    return false; // Different bank branch offices = DIFFERENT payments!
+  }
 
-    const sameDesc = normDesc1.length > 3 && normDesc2.length > 3 && 
-                     (normDesc1 === normDesc2);
+  // 9. Description matching
+  const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    if (sameDesc && tx1.fecha === tx2.fecha) {
-      return true;
+  if (normDesc1 && normDesc2) {
+    const sameDesc = (normDesc1 === normDesc2) ||
+                     (normDesc1.length > 5 && normDesc2.length > 5 && (normDesc1.includes(normDesc2) || normDesc2.includes(normDesc1))) ||
+                     (normDesc1.substring(0, 15) === normDesc2.substring(0, 15));
+    if (!sameDesc) {
+      return false;
     }
   }
 
-  return false;
+  return true;
 }
 
 // Fast O(1) Transaction Indexing Engine for Hyper-fast Deduplication
@@ -761,7 +797,7 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
     }
   }
 
-  // 4. Fallback: Check candidate transactions sharing the exact rounded monetary amount
+  // 4. Candidate Search: Check candidate transactions sharing the exact rounded monetary amount
   const valKey = Math.round(tx.valor || 0);
   const candidates = index.byValor.get(valKey);
   if (candidates && candidates.length > 0) {
@@ -775,8 +811,9 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
   return null;
 }
 
-export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number } {
+export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number; duplicateIdsToRemove: string[] } {
   const cleaned: Transaction[] = [];
+  const duplicateIdsToRemove: string[] = [];
   let removedCount = 0;
   const index = buildTransactionIndex([]);
 
@@ -785,12 +822,17 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
     if (existing) {
       removedCount++;
       const isNowIdentified = existing.identificada || tx.identificada;
+      const bestComprobante = (isRealComprobante(tx.comprobante) ? tx.comprobante : null) ||
+                              (isRealComprobante(existing.comprobante) ? existing.comprobante : null) ||
+                              tx.comprobante || existing.comprobante || undefined;
+      const bestOficina = tx.oficina || existing.oficina || undefined;
+
       const merged: Transaction = {
         ...existing,
         identificada: isNowIdentified,
         esHistorico: existing.esHistorico && tx.esHistorico,
-        comprobante: existing.comprobante || tx.comprobante || undefined,
-        oficina: existing.oficina || tx.oficina || undefined,
+        comprobante: bestComprobante,
+        oficina: bestOficina,
         nroReciboCaja: existing.nroReciboCaja || tx.nroReciboCaja || null,
         fechaIdentificacion: existing.fechaIdentificacion || tx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
         usuarioIdentificacion: existing.usuarioIdentificacion || tx.usuarioIdentificacion || null,
@@ -799,6 +841,10 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
         justificacionIgnorado: existing.justificacionIgnorado || tx.justificacionIgnorado || null
       };
 
+      if (tx.id && tx.id !== existing.id) {
+        duplicateIdsToRemove.push(tx.id);
+      }
+
       const idx = cleaned.findIndex(c => c.id === existing.id);
       if (idx !== -1) {
         cleaned[idx] = merged;
@@ -806,6 +852,13 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
 
       index.byId.set(merged.id, merged);
       if (merged.llaveUnica) index.byLlaveUnica.set(merged.llaveUnica, merged);
+      if (isRealComprobante(merged.comprobante)) {
+        const normComp = (merged.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normCta = (merged.cuenta || '').replace(/\D/g, '').slice(-4);
+        const normVal = Math.round(merged.valor || 0);
+        const normFec = (merged.fecha || '').replace(/[-/]/g, '');
+        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, merged);
+      }
     } else {
       cleaned.push(tx);
       if (tx.id) index.byId.set(tx.id, tx);
@@ -824,19 +877,32 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
     }
   }
 
-  return { cleaned, removedCount };
+  return { cleaned, removedCount, duplicateIdsToRemove };
 }
 
 export async function purgeDuplicateTransactionsFromDatabase(adminName: string): Promise<{ totalPurged: number }> {
   const current = getTransactions();
-  const { cleaned, removedCount } = deduplicateTransactionList(current);
+  const { cleaned, removedCount, duplicateIdsToRemove } = deduplicateTransactionList(current);
 
   if (removedCount > 0) {
     saveTransactions(cleaned);
+
+    if (duplicateIdsToRemove && duplicateIdsToRemove.length > 0) {
+      try {
+        const batch = writeBatch(db);
+        duplicateIdsToRemove.forEach(id => {
+          batch.delete(doc(db, 'transactions', id));
+        });
+        await batch.commit();
+      } catch (e) {
+        console.warn('Error purging duplicate documents from Firestore:', e);
+      }
+    }
+
     addAuditLog(
       adminName,
       'Depuración de Duplicados',
-      `Ejecutó depuración automática de duplicados. Se eliminaron/fusionaron ${removedCount} registros duplicados.`
+      `Ejecutó depuración automática de duplicados. Se eliminaron/fusionaron ${removedCount} registros duplicados (unificando referencias y oficinas).`
     );
   }
 
@@ -874,12 +940,17 @@ export async function uploadBankTransactions(
     if (existingTx) {
       duplicates++;
       const isNowIdentified = tx.identificada || existingTx.identificada;
+      const bestComprobante = (isRealComprobante(tx.comprobante) ? tx.comprobante : null) ||
+                              (isRealComprobante(existingTx.comprobante) ? existingTx.comprobante : null) ||
+                              tx.comprobante || existingTx.comprobante;
+      const bestOficina = tx.oficina || existingTx.oficina;
+
       const updatedTx: Transaction = {
         ...existingTx,
         identificada: isNowIdentified,
         esHistorico: false, // Restore / un-archive transaction on re-import
-        comprobante: tx.comprobante || existingTx.comprobante,
-        oficina: tx.oficina || existingTx.oficina,
+        comprobante: bestComprobante,
+        oficina: bestOficina,
         nroReciboCaja: tx.nroReciboCaja || existingTx.nroReciboCaja,
         fechaIdentificacion: tx.fechaIdentificacion || existingTx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
         usuarioIdentificacion: tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName,
@@ -890,6 +961,13 @@ export async function uploadBankTransactions(
       currentMap.set(existingTx.id, updatedTx);
       index.byId.set(updatedTx.id, updatedTx);
       if (updatedTx.llaveUnica) index.byLlaveUnica.set(updatedTx.llaveUnica, updatedTx);
+      if (isRealComprobante(updatedTx.comprobante)) {
+        const normComp = (updatedTx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normCta = (updatedTx.cuenta || '').replace(/\D/g, '').slice(-4);
+        const normVal = Math.round(updatedTx.valor || 0);
+        const normFec = (updatedTx.fecha || '').replace(/[-/]/g, '');
+        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, updatedTx);
+      }
       changedTxs.push(updatedTx);
     } else {
       const newTx = {
@@ -899,6 +977,13 @@ export async function uploadBankTransactions(
       currentMap.set(newTx.id, newTx);
       index.byId.set(newTx.id, newTx);
       if (newTx.llaveUnica) index.byLlaveUnica.set(newTx.llaveUnica, newTx);
+      if (isRealComprobante(newTx.comprobante)) {
+        const normComp = (newTx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normCta = (newTx.cuenta || '').replace(/\D/g, '').slice(-4);
+        const normVal = Math.round(newTx.valor || 0);
+        const normFec = (newTx.fecha || '').replace(/[-/]/g, '');
+        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, newTx);
+      }
       changedTxs.push(newTx);
       imported++;
     }
