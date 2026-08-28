@@ -18,8 +18,21 @@ import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatM
 import { getColombiaDateTime } from './utils/formato';
 import { isRealComprobante } from './utils/llave-unica';
 
-// Firebase configuration from firebase-applet-config.json
-const firebaseConfig = {
+// TEMPORARY EMERGENCY FIRESTORE PROJECT (Spark)
+// Firestore is switched to TRANSFERENCIAS TEMP so the app can keep working
+// while billing on the original Firebase project is resolved.
+const tempFirebaseConfig = {
+  apiKey: "AIzaSyB7eOWtXid8H0MiATBO1-NBDdOAr5Y3yEg",
+  authDomain: "transferencias-temp.firebaseapp.com",
+  projectId: "transferencias-temp",
+  storageBucket: "transferencias-temp.firebasestorage.app",
+  messagingSenderId: "617081936030",
+  appId: "1:617081936030:web:540103eafedd2d799e038f"
+};
+
+// Keep the ORIGINAL project only for Firebase Storage so existing uploaded
+// files/receipts remain available. The quota problem is Firestore, not Storage.
+const legacyStorageConfig = {
   apiKey: "AIzaSyBlKnYrZy8nQj6KgP7qCW9k1F-QeCK2Oyo",
   authDomain: "gen-lang-client-0899368462.firebaseapp.com",
   projectId: "gen-lang-client-0899368462",
@@ -28,12 +41,15 @@ const firebaseConfig = {
   appId: "1:303118479370:web:d2c45dbd5796070b172ff3"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize temporary Firestore using the (default) database.
+const app = initializeApp(tempFirebaseConfig);
 export const db = initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true,
-}, "ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212");
-export const storage = getStorage(app);
+});
+
+// Separate named app for the legacy Storage bucket.
+const legacyStorageApp = initializeApp(legacyStorageConfig, 'legacy-storage');
+export const storage = getStorage(legacyStorageApp);
 
 // Predefined accounts for login
 export const PREDEFINED_USERS: User[] = [
