@@ -205,7 +205,7 @@ export function initializeRealtimeListeners() {
 
     // Ensure the 2nd distinct $50,400 transaction is present in PENDING state if missing
     const hasSecond50400 = cleaned.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764_o1');
-    if (!hasSecond50400) {
+    if (!hasSecond50400 && cleaned.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764')) {
       const secondTx: Transaction = {
         id: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
         llaveUnica: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
@@ -222,7 +222,6 @@ export function initializeRealtimeListeners() {
         esQR: true
       };
       cleaned.push(secondTx);
-      setDoc(doc(db, 'transactions', secondTx.id), secondTx).catch(() => {});
     }
 
     // Sort: latest dates first
