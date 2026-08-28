@@ -180,17 +180,24 @@ export function initializeRealtimeListeners() {
       usersList.push(docSnap.data() as User);
     });
 
-    safeSetLocalStorage(STORAGE_USERS_KEY, JSON.stringify(usersList));
-    notifyListeners();
+    if (usersList.length > 0) {
+      const userMap = new Map<string, User>();
+      PREDEFINED_USERS.forEach(u => userMap.set(u.email.toLowerCase(), u));
+      usersList.forEach(u => {
+        if (u && u.email) {
+          userMap.set(u.email.toLowerCase(), {
+            ...userMap.get(u.email.toLowerCase()),
+            ...u
+          });
+        }
+      });
+      safeSetLocalStorage(STORAGE_USERS_KEY, JSON.stringify(Array.from(userMap.values())));
+      notifyListeners();
+    }
   }, handleListenerError('users'));
 
   // 2. Transactions listener
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
-    let txList: Transaction[] = [];
-    snapshot.forEach(docSnap => {
-      txList.push(docSnap.data() as Transaction);
-    });
-
     // Cleaned transactions list
     const cleaned: Transaction[] = [];
     snapshot.forEach(docSnap => {
@@ -224,15 +231,17 @@ export function initializeRealtimeListeners() {
       cleaned.push(secondTx);
     }
 
-    // Sort: latest dates first
-    cleaned.sort((a, b) => {
-      const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
-      const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
-      return dateTimeB.localeCompare(dateTimeA);
-    });
+    if (cleaned.length > 0) {
+      // Sort: latest dates first
+      cleaned.sort((a, b) => {
+        const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
+        const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
+        return dateTimeB.localeCompare(dateTimeA);
+      });
 
-    safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
-    notifyListeners();
+      safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
+      notifyListeners();
+    }
   }, handleListenerError('transactions'));
 
   // 3. Batches listener
@@ -242,10 +251,11 @@ export function initializeRealtimeListeners() {
       batchList.push(docSnap.data() as UploadBatch);
     });
 
-    batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
-
-    safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
-    notifyListeners();
+    if (batchList.length > 0) {
+      batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
+      safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
+      notifyListeners();
+    }
   }, handleListenerError('batches'));
 
   // 4. Cierres listener
@@ -497,13 +507,27 @@ ensurePredefinedTransactionsInFirestore();
 // USERS OPERATIONS
 // ----------------------------------------------------
 export function getUsers(): User[] {
+  const userMap = new Map<string, User>();
+  PREDEFINED_USERS.forEach(u => userMap.set(u.email.toLowerCase(), u));
+
   const data = localStorage.getItem(STORAGE_USERS_KEY);
-  if (data === null) return PREDEFINED_USERS;
-  try {
-    return JSON.parse(data) as User[];
-  } catch (e) {
-    return PREDEFINED_USERS;
+  if (data) {
+    try {
+      const list = JSON.parse(data) as User[];
+      if (Array.isArray(list)) {
+        list.forEach(u => {
+          if (u && u.email) {
+            const existing = userMap.get(u.email.toLowerCase());
+            userMap.set(u.email.toLowerCase(), {
+              ...existing,
+              ...u
+            });
+          }
+        });
+      }
+    } catch (e) {}
   }
+  return Array.from(userMap.values());
 }
 
 export async function saveUsers(users: User[]) {
