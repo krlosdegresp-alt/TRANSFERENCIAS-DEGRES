@@ -53,14 +53,23 @@ export const storage = getStorage(legacyStorageApp);
 
 // Predefined accounts for login
 export const PREDEFINED_USERS: User[] = [
-  { id: 'u0', email: 'gestioncalidad@degrescolombia.com', nombre: 'Gestión Calidad (Admin)', role: 'Admin', password: 'Admin123' },
-  { id: 'u1', email: 'admin@degrescolombia.com', nombre: 'Admin General', role: 'Admin', password: 'Admin123' },
-  { id: 'u2', email: 'tesorera@degrescolombia.com', nombre: 'Marta Delgado (Tesorería)', role: 'Tesorera', password: 'Tesorera123' },
-  { id: 'u3', email: 'cajera.guayabal@degrescolombia.com', nombre: 'Lucía Pérez (Caja Guayabal)', role: 'Cajera', sede: 'Guayabal', password: 'Sede123' },
-  { id: 'u4', email: 'cajera.sabaneta@degrescolombia.com', nombre: 'Sofía Montoya (Caja Sabaneta)', role: 'Cajera', sede: 'Sabaneta', password: 'Sede123' },
-  { id: 'u5', email: 'cajera.naranjal@degrescolombia.com', nombre: 'Claudia Giraldo (Caja Naranjal)', role: 'Cajera', sede: 'Naranjal', password: 'Sede123' },
-  { id: 'u6', email: 'asesor@degrescolombia.com', nombre: 'Mateo Osorio (Socio Comercial)', role: 'Asesor', password: 'Asesor123' },
-  { id: 'u7', email: 'analistati@degrescolombia.com', nombre: 'Carlos Ti', role: 'Admin', password: 'Admin123' }
+  { id: 'u0',  email: 'auxcontable@degrescolombia.com',      nombre: 'Tatiana (Tesorera)',        role: 'Tesorera', password: 'Tatiana123' },
+  { id: 'u1',  email: 'gestioncalidad@degrescolombia.com',   nombre: 'Shirley J. (Admin)',        role: 'Admin',    password: 'Admin123' },
+  { id: 'u2',  email: 'cguayabal@degrescolombia.com',        nombre: 'Martha (Cajera)',            role: 'Cajera',   sede: 'Guayabal', password: 'Martha123' },
+  { id: 'u3',  email: 'analistati@degrescolombia.com',       nombre: 'Carlos Ti (Admin)',          role: 'Admin',    password: 'Carlos2026*' },
+  { id: 'u4',  email: 'ventasdegres@degrescolombia.com',     nombre: 'Edwin Cardona (Asesor)',     role: 'Asesor',   password: 'Edwin123' },
+  { id: 'u5',  email: 'npulgarin@degrescolombia.com',        nombre: 'Nora Pulgarín (Asesora)',    role: 'Asesor',   password: 'Nora123' },
+  { id: 'u6',  email: 'harias@degrescolombia.com',           nombre: 'Hernan (Asesor)',            role: 'Asesor',   password: 'Hernan123' },
+  { id: 'u7',  email: 'jtaborda@degrescolombia.com',         nombre: 'Jeimis Taborda (Asesora)',   role: 'Asesor',   password: 'Jeimis123' },
+  { id: 'u8',  email: 'eholguin@degrescolombia.com',         nombre: 'Edwin Holguin (Asesor)',     role: 'Asesor',   password: 'Edwin123' },
+  { id: 'u9',  email: 'dmazo@degrescolombia.com',            nombre: 'Diego Mazo (Asesor)',        role: 'Asesor',   password: 'Diego123' },
+  { id: 'u10', email: 'ventasg@degrescolombia.com',          nombre: 'Yuriani Manjarrez (Asesora)',role: 'Asesor',   password: 'Yuriani123' },
+  { id: 'u11', email: 'mzapata@degrescolombia.com',          nombre: 'Martha Zapata (Cajera)',     role: 'Cajera',   sede: 'Sabaneta', password: 'Martha123' },
+  { id: 'u12', email: 'dgiraldo@degrescolombia.com',         nombre: 'Dora Giraldo (Cajera)',      role: 'Cajera',   sede: 'Naranjal', password: 'Dora123' },
+  { id: 'u13', email: 'earango@degrescolombia.com',          nombre: 'Elina Arango',                role: 'Tesorera', password: 'Elina123' },
+  { id: 'u14', email: 'gestionhumana@degrescolombia.com',    nombre: 'Margarita (Cajera)',         role: 'Cajera',   sede: 'Guayabal', password: 'Margarita123' },
+  { id: 'u15', email: 'mzapata@degrescolombia.com',          nombre: 'Martha Zapata (Asesora)',    role: 'Asesor',   password: 'Martha123' },
+  { id: 'u16', email: 'jaguirre@degrescolombia.com',         nombre: 'Juliana Aguirre (Asesora)',  role: 'Asesor',   password: 'Juliana123' }
 ];
 
 export const PREDEFINED_ADVISORS: string[] = [];
@@ -197,12 +206,14 @@ export function initializeRealtimeListeners() {
     });
 
     if (usersList.length > 0) {
+      // Preserve users by document/user ID rather than email.
+      // This is required because two valid records intentionally share the same email.
       const userMap = new Map<string, User>();
-      PREDEFINED_USERS.forEach(u => userMap.set(u.email.toLowerCase(), u));
+      PREDEFINED_USERS.forEach(u => userMap.set(u.id, u));
       usersList.forEach(u => {
-        if (u && u.email) {
-          userMap.set(u.email.toLowerCase(), {
-            ...userMap.get(u.email.toLowerCase()),
+        if (u && u.id) {
+          userMap.set(u.id, {
+            ...userMap.get(u.id),
             ...u
           });
         }
@@ -490,7 +501,10 @@ async function migrateLocalCacheToTempFirestore() {
 
 // Important: migrate first; only then attach real-time listeners so an empty
 // temporary database cannot erase the useful cache in this browser.
-migrateLocalCacheToTempFirestore().finally(() => initializeRealtimeListeners());
+migrateLocalCacheToTempFirestore().finally(async () => {
+  await repairTempUsersFromCanonicalList();
+  initializeRealtimeListeners();
+});
 
 export function getSystemConfig(): SystemConfig {
   const data = localStorage.getItem(STORAGE_SYSTEM_CONFIG_KEY);
@@ -556,6 +570,27 @@ export async function setMaintenanceMode(
   }
 }
 
+// One-time emergency repair of the TEMP users collection.
+// It ONLY replaces 'users'; transactions, batches, logs and configs are untouched.
+const TEMP_CANONICAL_USERS_MARKER = 'temp_canonical_users_2026_08_28_v1';
+async function repairTempUsersFromCanonicalList() {
+  if (localStorage.getItem(TEMP_CANONICAL_USERS_MARKER)) return;
+  try {
+    console.log('[TEMP USERS] Replacing temporary users with the verified list...');
+    const snap = await getDocs(collection(db, 'users'));
+    const batch = writeBatch(db);
+    snap.docs.forEach(d => batch.delete(d.ref));
+    PREDEFINED_USERS.forEach(u => batch.set(doc(db, 'users', u.id), u));
+    await batch.commit();
+    safeSetLocalStorage(STORAGE_USERS_KEY, JSON.stringify(PREDEFINED_USERS));
+    localStorage.setItem(TEMP_CANONICAL_USERS_MARKER, 'true');
+    console.log(`[TEMP USERS] COMPLETE. ${PREDEFINED_USERS.length} verified users written.`);
+    notifyListeners();
+  } catch (error) {
+    console.error('[TEMP USERS] Repair failed:', error);
+  }
+}
+
 // Ensure Carlos Ti and other predefined users are in Firestore if not already present
 async function ensurePredefinedUsersInFirestore() {
   if (localStorage.getItem('firestore_users_seeded_v1')) return;
@@ -606,8 +641,9 @@ ensurePredefinedTransactionsInFirestore();
 // USERS OPERATIONS
 // ----------------------------------------------------
 export function getUsers(): User[] {
+  // Key by ID, not email, because duplicate email records are intentional.
   const userMap = new Map<string, User>();
-  PREDEFINED_USERS.forEach(u => userMap.set(u.email.toLowerCase(), u));
+  PREDEFINED_USERS.forEach(u => userMap.set(u.id, u));
 
   const data = localStorage.getItem(STORAGE_USERS_KEY);
   if (data) {
@@ -615,9 +651,9 @@ export function getUsers(): User[] {
       const list = JSON.parse(data) as User[];
       if (Array.isArray(list)) {
         list.forEach(u => {
-          if (u && u.email) {
-            const existing = userMap.get(u.email.toLowerCase());
-            userMap.set(u.email.toLowerCase(), {
+          if (u && u.id) {
+            const existing = userMap.get(u.id);
+            userMap.set(u.id, {
               ...existing,
               ...u
             });
