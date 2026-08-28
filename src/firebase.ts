@@ -188,23 +188,17 @@ export function initializeRealtimeListeners() {
       txList.push(docSnap.data() as Transaction);
     });
 
-    // Auto-deduplicate stored snapshot transactions
-    const { cleaned, duplicateIdsToRemove } = deduplicateTransactionList(txList);
-
-    // Clean any redundant duplicate doc IDs from Firestore
-    if (duplicateIdsToRemove && duplicateIdsToRemove.length > 0) {
-      (async () => {
-        try {
-          const batch = writeBatch(db);
-          duplicateIdsToRemove.forEach(id => {
-            batch.delete(doc(db, 'transactions', id));
-          });
-          await batch.commit();
-        } catch (e) {
-          console.warn('Auto-cleanup duplicate documents warning:', e);
-        }
-      })();
-    }
+    // Cleaned transactions list
+    const cleaned: Transaction[] = [];
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data() as Transaction;
+      const tx: Transaction = {
+        ...data,
+        id: data.id || docSnap.id,
+        llaveUnica: data.llaveUnica || data.id || docSnap.id
+      };
+      cleaned.push(tx);
+    });
 
     // Sort: latest dates first
     cleaned.sort((a, b) => {
@@ -647,90 +641,40 @@ export function saveUploadBatches(batches: UploadBatch[]) {
 // DEDUPLICATION ENGINE
 // ----------------------------------------------------
 export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): boolean {
-  // 1. Exact ID or LlaveUnica match -> DEFINITELY DUPLICATE
-  if (tx1.id === tx2.id || (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica === tx2.llaveUnica)) {
+  // 1. Exact ID match -> DEFINITELY DUPLICATE
+  if (tx1.id && tx2.id && tx1.id === tx2.id) {
+    return true;
+  }
+  // 2. Exact LlaveUnica match -> DEFINITELY DUPLICATE
+  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica === tx2.llaveUnica) {
     return true;
   }
 
-  // 2. Value matching (within $0.01 COP tolerance)
-  const sameValor = Math.abs((tx1.valor || 0) - (tx2.valor || 0)) < 0.01;
-  if (!sameValor) return false;
-
-  // 3. Date matching
-  if (tx1.fecha !== tx2.fecha) {
-    // Check if it was day/month swapped (e.g. 2026-05-08 vs 2026-08-05)
-    let isSwapped = false;
-    if (tx1.fecha && tx2.fecha) {
-      const p1 = tx1.fecha.split('-');
-      const p2 = tx2.fecha.split('-');
-      if (p1.length === 3 && p2.length === 3 && p1[0] === p2[0] && p1[1] === p2[2] && p1[2] === p2[1]) {
-        isSwapped = true;
-      }
-    }
-    if (!isSwapped) return false;
+  // 3. If BOTH transactions have distinct unique keys or IDs, they represent separate rows/occurrences in the bank statements!
+  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica !== tx2.llaveUnica) {
+    return false;
+  }
+  if (tx1.id && tx2.id && tx1.id !== tx2.id) {
+    return false;
   }
 
-  // 4. Account / Sede matching
-  const normCta1 = (tx1.cuenta || '').replace(/\D/g, '').slice(-4);
-  const normCta2 = (tx2.cuenta || '').replace(/\D/g, '').slice(-4);
-  const sameAccount = (normCta1 && normCta2 && normCta1 === normCta2) ||
-                      (tx1.sede !== 'Desconocida' && tx1.sede === tx2.sede) ||
-                      (!normCta1 || !normCta2);
-
-  if (!sameAccount) return false;
-
-  // 5. Check occurrence index within the SAME statement batch:
-  // If BOTH transactions have explicit occurrence indexes (e.g. _o1 vs _o2), they are separate occurrences.
-  const oMatch1 = (tx1.llaveUnica || '').match(/_o(\d+)$/);
-  const oMatch2 = (tx2.llaveUnica || '').match(/_o(\d+)$/);
-  if (oMatch1 && oMatch2 && oMatch1[1] !== oMatch2[1]) {
-    return false; // Different occurrence indices in the same statement file
-  }
-
-  // 6. Real Genuine Comprobante / Voucher check
-  // If BOTH have genuine bank voucher / comprobante numbers and they are DIFFERENT -> DIFFERENT payments!
-  // If ONE has a genuine comprobante and the OTHER has NO comprobante (or dummy), they ARE COMPATIBLE (merge/enrich)!
+  // 4. Real Genuine Comprobante / Voucher check
   const isReal1 = isRealComprobante(tx1.comprobante);
   const isReal2 = isRealComprobante(tx2.comprobante);
 
   if (isReal1 && isReal2) {
     const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normComp1 !== normComp2) {
-      return false; // Different genuine vouchers = DIFFERENT payments!
+    const sameValor = Math.abs((tx1.valor || 0) - (tx2.valor || 0)) < 0.01;
+    if (normComp1 === normComp2 && tx1.fecha === tx2.fecha && sameValor) {
+      return true; // Exact same payment voucher on the same date and amount!
     }
+    return false; // Different genuine vouchers = DIFFERENT payments!
   }
 
-  // 7. Time check (if both have recorded distinct times, e.g. "12:15:20" vs "17:05:42")
-  const normHora1 = (tx1.hora || '').trim().replace(/[:]/g, '');
-  const normHora2 = (tx2.hora || '').trim().replace(/[:]/g, '');
-  if (normHora1 && normHora2 && normHora1 !== '120000' && normHora2 !== '120000') {
-    if (normHora1 !== normHora2) {
-      return false; // Different times = DIFFERENT payments!
-    }
-  }
-
-  // 8. Oficina matching (if both have non-empty oficina specified)
-  const normOfi1 = (tx1.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const normOfi2 = (tx2.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (normOfi1 && normOfi2 && normOfi1 !== normOfi2) {
-    return false; // Different bank branch offices = DIFFERENT payments!
-  }
-
-  // 9. Description matching
-  const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  if (normDesc1 && normDesc2) {
-    const sameDesc = (normDesc1 === normDesc2) ||
-                     (normDesc1.length > 5 && normDesc2.length > 5 && (normDesc1.includes(normDesc2) || normDesc2.includes(normDesc1))) ||
-                     (normDesc1.substring(0, 15) === normDesc2.substring(0, 15));
-    if (!sameDesc) {
-      return false;
-    }
-  }
-
-  return true;
+  // Under no other conditions should we assume two transactions are duplicates.
+  // Multiple distinct payments can occur on the same date for the same client and amount (e.g. daily limit transfers or multiple QR payments).
+  return false;
 }
 
 // Fast O(1) Transaction Indexing Engine for Hyper-fast Deduplication
@@ -738,15 +682,13 @@ interface TransactionIndex {
   byId: Map<string, Transaction>;
   byLlaveUnica: Map<string, Transaction>;
   byComprobante: Map<string, Transaction>;
-  byValor: Map<number, Transaction[]>;
 }
 
 function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
   const index: TransactionIndex = {
     byId: new Map(),
     byLlaveUnica: new Map(),
-    byComprobante: new Map(),
-    byValor: new Map()
+    byComprobante: new Map()
   };
 
   for (const tx of txs) {
@@ -760,14 +702,6 @@ function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
       const normVal = Math.round(tx.valor || 0);
       const normFec = (tx.fecha || '').replace(/[-/]/g, '');
       index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
-    }
-
-    const valKey = Math.round(tx.valor || 0);
-    const existingGroup = index.byValor.get(valKey);
-    if (existingGroup) {
-      existingGroup.push(tx);
-    } else {
-      index.byValor.set(valKey, [tx]);
     }
   }
 
@@ -794,17 +728,6 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
     const compKey = `${normCta}_${normFec}_${normVal}_${normComp}`;
     if (index.byComprobante.has(compKey)) {
       return index.byComprobante.get(compKey)!;
-    }
-  }
-
-  // 4. Candidate Search: Check candidate transactions sharing the exact rounded monetary amount
-  const valKey = Math.round(tx.valor || 0);
-  const candidates = index.byValor.get(valKey);
-  if (candidates && candidates.length > 0) {
-    for (const candidate of candidates) {
-      if (isDuplicateTransaction(candidate, tx)) {
-        return candidate;
-      }
     }
   }
 
@@ -870,10 +793,6 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
         const normFec = (tx.fecha || '').replace(/[-/]/g, '');
         index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
       }
-      const valKey = Math.round(tx.valor || 0);
-      const group = index.byValor.get(valKey);
-      if (group) group.push(tx);
-      else index.byValor.set(valKey, [tx]);
     }
   }
 

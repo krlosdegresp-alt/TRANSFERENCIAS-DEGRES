@@ -476,6 +476,7 @@ export function parseExcelBankFile(
     // Search for a table header row (rows 0..35)
     let headerRowIdx = -1;
     let fechaColIdx = -1;
+    let horaColIdx = -1;
     let descColIdx = -1;
     let oficinaColIdx = -1;
     let cuentaColIdx = -1;
@@ -487,6 +488,7 @@ export function parseExcelBankFile(
       if (!row || row.length < 2) continue;
 
       let foundFecha = -1;
+      let foundHora = -1;
       let foundValor = -1;
       let foundDesc = -1;
       let foundOficina = -1;
@@ -499,6 +501,8 @@ export function parseExcelBankFile(
 
         if (foundFecha === -1 && (cellText.includes('fecha') || cellText.includes('fec') || cellText === 'date' || cellText.includes('dia') || cellText.includes('día'))) {
           foundFecha = c;
+        } else if (foundHora === -1 && (cellText.includes('hora') || cellText === 'time' || cellText.includes('horario'))) {
+          foundHora = c;
         } else if (foundValor === -1 && (cellText.includes('valor') || cellText.includes('monto') || cellText.includes('importe') || cellText.includes('credito') || cellText.includes('crédito') || cellText.includes('ingreso') || cellText.includes('abono') || cellText.includes('deposito') || cellText.includes('depósito') || cellText.includes('entrada') || cellText.includes('pago'))) {
           foundValor = c;
         } else if (foundDesc === -1 && (cellText.includes('descripc') || cellText.includes('detalle') || cellText.includes('concepto') || cellText.includes('movimiento') || cellText === 'desc' || cellText.includes('leyenda') || cellText.includes('transaccion') || cellText.includes('transacción'))) {
@@ -516,6 +520,7 @@ export function parseExcelBankFile(
       if (foundFecha !== -1 && (foundValor !== -1 || foundDesc !== -1)) {
         headerRowIdx = r;
         fechaColIdx = foundFecha;
+        horaColIdx = foundHora;
         valorColIdx = foundValor;
         descColIdx = foundDesc;
         oficinaColIdx = foundOficina;
@@ -596,7 +601,15 @@ export function parseExcelBankFile(
 
       // Parse Date & Time
       const fecha = parseExcelDate(row[fechaColIdx]);
-      const hora = extractExcelTime(row[fechaColIdx]) || '';
+      let hora = '';
+      if (horaColIdx !== -1 && row[horaColIdx] !== undefined && row[horaColIdx] !== null) {
+        hora = parseExcelTime(row[horaColIdx]);
+        if (hora === '12:00:00') hora = '';
+      }
+      if (!hora) {
+        const extracted = extractExcelTime(row[fechaColIdx]);
+        if (extracted && extracted !== '12:00:00') hora = extracted;
+      }
 
       // Parse Account
       let cuenta = String(row[cuentaColIdx] || '').trim();
@@ -640,7 +653,7 @@ export function parseExcelBankFile(
       const comprobante = String(row[comprobanteColIdx] || '').trim();
 
       // Generate stable unique signature
-      const sig = `${cuenta}_${fecha}_${valor}_${desc.toUpperCase()}_${comprobante}`;
+      const sig = `${cuenta}_${fecha}_${valor}_${desc.toUpperCase()}_${comprobante}_${hora}`;
       const ocurr_idx = occurrenceCounts[sig] || 0;
       occurrenceCounts[sig] = ocurr_idx + 1;
 
