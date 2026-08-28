@@ -311,30 +311,9 @@ export function parseExcelBankFile(
   const currentTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const list: Transaction[] = [];
   
-  // Seed occurrence counts from existing transactions in storage/database
-  // This guarantees that if a transaction with the same signature already exists in the system
-  // (such as one of multiple identical QR payments that has already been conciliated/identified),
-  // new uploaded instances will automatically receive the next occurrence index (_o1, _o2, etc.)
-  // and will not collide with or overwrite the existing record.
+  // Track occurrences within the workbook so multiple identical rows (e.g. 2 identical QR payments)
+  // in rows 8 and 9 receive unique deterministic keys (index 0 for row 8, index 1 (_o1) for row 9)
   const occurrenceCounts: Record<string, number> = {};
-  try {
-    const rawSaved = localStorage.getItem('degres_colombia_transacciones_v1');
-    if (rawSaved) {
-      const existingTxs: Transaction[] = JSON.parse(rawSaved);
-      if (Array.isArray(existingTxs)) {
-        for (const tx of existingTxs) {
-          if (!tx || !tx.cuenta || !tx.fecha || !tx.valor) continue;
-          const txComp = String(tx.comprobante || '').trim();
-          const txDesc = String(tx.descripcion || '').trim().toUpperCase();
-          const txHora = String(tx.hora || '').trim();
-          const sig = `${tx.cuenta}_${tx.fecha}_${tx.valor}_${txDesc}_${txComp}_${txHora}`;
-          occurrenceCounts[sig] = (occurrenceCounts[sig] || 0) + 1;
-        }
-      }
-    }
-  } catch (e) {
-    // If reading local storage fails, start with fresh occurrence counts
-  }
 
   // Iterate over ALL worksheets in the workbook
   for (const sheetName of workbook.SheetNames) {
