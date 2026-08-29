@@ -16,6 +16,7 @@ import {
   getUploadBatches
 } from '../firebase';
 import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h, formatTime12h } from '../utils/formato';
+import { esMovimientoIrrelevante } from '../utils/parser-excel';
 import { Transaction, User, Sede, CierreCaja, UploadBatch } from '../types';
 import { 
   FileCheck2, 
@@ -142,6 +143,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   // Base filter (without status filter) for widgets and reactive totals
   const baseFilteredTransactions = transactions.filter(tx => {
     if (tx.esHistorico) return false;
+    if (esMovimientoIrrelevante(tx.valor, tx.descripcion)) return false;
 
     const matchesSearch = 
       tx.llaveUnica.toLowerCase().includes(searchTerm.toLowerCase()) ||

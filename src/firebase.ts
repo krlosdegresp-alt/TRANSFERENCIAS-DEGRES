@@ -228,6 +228,7 @@ export function initializeRealtimeListeners() {
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
     // Cleaned transactions list
     const cleaned: Transaction[] = [];
+    const irrelevantDocIds: string[] = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as Transaction;
       const tx: Transaction = {
@@ -235,10 +236,29 @@ export function initializeRealtimeListeners() {
         id: data.id || docSnap.id,
         llaveUnica: data.llaveUnica || data.id || docSnap.id
       };
-      if (!esMovimientoIrrelevante(tx.valor, tx.descripcion)) {
+      if (esMovimientoIrrelevante(tx.valor, tx.descripcion)) {
+        irrelevantDocIds.push(docSnap.id);
+      } else {
         cleaned.push(tx);
       }
     });
+
+    // Clean up any residual irrelevant documents in Firestore in background
+    if (irrelevantDocIds.length > 0) {
+      (async () => {
+        try {
+          for (let i = 0; i < irrelevantDocIds.length; i += 400) {
+            const b = writeBatch(db);
+            irrelevantDocIds.slice(i, i + 400).forEach(id => {
+              b.delete(doc(db, 'transactions', id));
+            });
+            await b.commit();
+          }
+        } catch (e) {
+          console.warn('[Firestore] Auto-purging irrelevant documents failed:', e);
+        }
+      })();
+    }
 
     // Ensure the 2nd distinct $50,400 transaction is present in PENDING state if missing
     const hasSecond50400 = cleaned.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764_o1');
