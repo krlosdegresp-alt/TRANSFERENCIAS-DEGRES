@@ -17,6 +17,7 @@ import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'fire
 import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall, ReportConfig, SystemConfig } from './types';
 import { getColombiaDateTime } from './utils/formato';
 import { isRealComprobante } from './utils/llave-unica';
+import { esMovimientoIrrelevante } from './utils/parser-excel';
 
 // TEMPORARY EMERGENCY FIRESTORE PROJECT (Spark)
 // Firestore is switched to TRANSFERENCIAS TEMP so the app can keep working
@@ -234,7 +235,9 @@ export function initializeRealtimeListeners() {
         id: data.id || docSnap.id,
         llaveUnica: data.llaveUnica || data.id || docSnap.id
       };
-      cleaned.push(tx);
+      if (!esMovimientoIrrelevante(tx.valor, tx.descripcion)) {
+        cleaned.push(tx);
+      }
     });
 
     // Ensure the 2nd distinct $50,400 transaction is present in PENDING state if missing
@@ -773,8 +776,9 @@ export function getTransactions(): Transaction[] {
   try {
     const list = JSON.parse(data) as Transaction[];
     if (Array.isArray(list)) {
-      const hasSecond50400 = list.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764_o1');
-      if (!hasSecond50400 && list.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764')) {
+      const filtered = list.filter(t => !esMovimientoIrrelevante(t.valor, t.descripcion));
+      const hasSecond50400 = filtered.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764_o1');
+      if (!hasSecond50400 && filtered.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764')) {
         const secondTx: Transaction = {
           id: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
           llaveUnica: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
@@ -790,9 +794,9 @@ export function getTransactions(): Transaction[] {
           comprobante: '90516764',
           esQR: true
         };
-        list.push(secondTx);
+        filtered.push(secondTx);
       }
-      return list;
+      return filtered;
     }
     return [];
   } catch (e) {
@@ -985,8 +989,11 @@ export async function uploadBankTransactions(
   localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
   setDoc(doc(db, 'configs', 'wipeState'), { wipeTime: 0 }).catch(() => {});
 
+  // 0. Filter out irrelevant movements (provider payments, payroll, commissions, bank service charges, taxes)
+  const filteredInputTxs = newTxs.filter(tx => !esMovimientoIrrelevante(tx.valor, tx.descripcion));
+
   // 1. Deduplicate incoming batch first
-  const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(newTxs);
+  const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(filteredInputTxs);
 
   const current = getTransactions();
   const index = buildTransactionIndex(current);

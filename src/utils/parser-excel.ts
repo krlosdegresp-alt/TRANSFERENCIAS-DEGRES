@@ -249,31 +249,127 @@ export function detectarSede(cuentaStr: string): Sede {
 }
 
 /**
- * Checks if a transaction description corresponds to bank taxes, commissions, or negative values.
+ * Checks if a transaction description corresponds to bank taxes, commissions, service fees,
+ * provider payments, payroll disbursements, or negative/irrelevant debits.
  */
 export function esMovimientoIrrelevante(valor: number, descripcion: string): boolean {
-  if (valor === 0 || isNaN(valor)) return true;
+  if (valor === 0 || isNaN(valor) || valor < 0) return true;
   
-  const desc = (descripcion || '').toUpperCase();
-  const wordsToDiscard = [
+  const rawDesc = String(descripcion || '');
+  // Normalize string: uppercase, remove accents/diacritics, collapse whitespace
+  const desc = rawDesc
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!desc) return false;
+
+  const patternsToDiscard = [
+    // Taxes and fiscal retentions
     '4X1.000',
     '4X1000',
+    '4 X 1000',
+    '4 X 1.000',
     'GMF',
     'GRAVAMEN',
-    'COBRO DE IVA',
-    'COBRO COMISION',
-    'IVA COMISION',
-    'IVA TRANS',
-    'COMISION',
     'RETEFUENTE',
     'RETEICA',
+    'RETEIVA',
+    'RETE FUENTE',
+    'RETE ICA',
+    'RETE IVA',
+    'RETENCION EN LA FUENTE',
+    'IMPUESTO GOBIERNO',
+    'IMPUESTO AL VALOR AGREGADO',
+
+    // Bank fees, commissions, interest, debits
+    'COBRO DE IVA',
+    'COBRO COMISION',
+    'COBRO IVA',
+    'IVA COMISION',
+    'IVA TRANS',
+    'IVA SERVICIO',
+    'IVA BANCARIO',
+    'IVA PAGO',
+    'COMISION',
+    'COMIS.',
+    'CUOTA DE MANEJO',
+    'CUOTA MANEJO',
+    'CUOTA MENSUAL',
     'COBRO INTERES',
-    'SALDO EN CONTRA',
     'INTERES DEBITO',
-    'EGRESO'
+    'INTERES MORA',
+    'INTERES CORRIENTE',
+    'SALDO EN CONTRA',
+    'EGRESO',
+    'DEBITO AUTOMATICO',
+    'NOTA DEBITO',
+    'CARGO DEBITO',
+
+    // Outbound supplier payments and service fees for supplier payments
+    'PAGO A PROVE', // Matches "PAGO A PROVEEDORES", "PAGO A PROVE [nombre]", "PAGO A PROVEEDOR", etc.
+    'PAGO PROVE',   // Matches "PAGO PROVEEDORES", "PAGO PROVEEDOR", etc.
+    'PAG A PROVE',
+    'PAG PROVE',
+    'PG PROVE',
+    'SERVICIO PAGO A PROVEEDORES',
+    'SERVICIO PAGO PROVEEDORES',
+    'SERVICIO PAGO A PROV',
+    'SERVICIO PAGO PROV',
+    'SERV PAGO PROV',
+    'SERV. PAGO PROV',
+    'SERV PAGO A PROVE',
+    'SERVICIO DE PAGO A PROVEEDORES',
+
+    // Outbound payroll payments and service fees for payroll
+    'SERVICIO PAGO DE NOMINA',
+    'SERVICIO PAGO NOMINA',
+    'SERVICIO DE NOMINA',
+    'SERVICIO NOMINA',
+    'SERV PAGO NOMINA',
+    'SERV NOMINA',
+    'PAGO DE NOMINA',
+    'PAGO NOMINA',
+    'PAG NOMINA',
+    'PAGO ELECTRONICO NOMINA',
+    'PAGO ELEC NOMINA',
+
+    // Third-party payment services and funds dispersions
+    'SERVICIO PAGO A TERCEROS',
+    'SERVICIO PAGO TERCEROS',
+    'PAGO A TERCEROS',
+    'PAGO TERCEROS',
+    'DISPERSION NOMINA',
+    'DISPERSION DE NOMINA',
+    'DISPERSION PROVEEDORES',
+    'DISPERSION DE FONDOS',
+    'DISPERSION FONDOS',
+    'DISPERSION',
+
+    // Service fees / charges
+    'CARGO POR SERVICIO',
+    'CARGO SERVICIO',
+    'COBRO SERVICIO',
+    'COBRO DE SERVICIO',
+    'COBRO POR SERVICIO',
+    'TARIFA SERVICIO',
+    'COSTO SERVICIO',
+    'SERVICIO DE RECAUDO',
+    'SERVICIO PAGO',
+    'SERV PAGO',
+    'SERV. PAGO',
+    'SERVICIO DE PAGO',
+
+    // Outbound transfers
+    'TRANSFERENCIA SALIENTE',
+    'TRANSFERENCIA ENVIADA',
+    'TRASLADO DE FONDOS',
+    'TRASLADO FONDOS'
   ];
 
-  return wordsToDiscard.some(word => desc.includes(word));
+  return patternsToDiscard.some(pattern => desc.includes(pattern));
 }
 
 /**
@@ -400,6 +496,7 @@ export function parseExcelBankFile(
         const desc = String(row[descCol] || '').trim().toUpperCase();
         const valor = parseColombianNumber(row[valorCol]);
         if (isNaN(valor) || valor <= 0) continue;
+        if (esMovimientoIrrelevante(valor, desc)) continue;
 
         const cuenta = String(row[cuentaCol] || '').trim();
         const sede = (String(row[sedeCol] || '').trim() || fallbackSede) as Sede;
