@@ -954,16 +954,35 @@ function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
     byId: new Map(),
     byLlaveUnica: new Map(),
     byComprobante: new Map(),
-    bySemantic: new Map()
+    bySemantic: new Map(),
+    byBankAlias: new Map()
   };
 
   for (const tx of txs) {
-    if (tx.id) index.byId.set(tx.id, tx);
-    if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
+    if (tx.id) {
+      index.byId.set(tx.id, tx);
+    }
+
+    if (tx.llaveUnica) {
+      index.byLlaveUnica.set(tx.llaveUnica, tx);
+    }
+
     const compKey = getComprobanteKey(tx);
-    if (compKey) index.byComprobante.set(compKey, tx);
+    if (compKey) {
+      index.byComprobante.set(compKey, tx);
+    }
+
     const semKey = getSemanticKey(tx);
-    if (semKey) index.bySemantic.set(semKey, tx);
+    if (semKey) {
+      index.bySemantic.set(semKey, tx);
+    }
+
+    const aliasKey = getBankAliasFamily(tx);
+    if (aliasKey) {
+      const existing = index.byBankAlias.get(aliasKey) || [];
+      existing.push(tx);
+      index.byBankAlias.set(aliasKey, existing);
+    }
   }
 
   return index;
@@ -988,11 +1007,31 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
 
   // 4. Semantic match (with specific time)
   const semKey = getSemanticKey(tx);
-  if (semKey && index.bySemantic.has(semKey)) {
-    return index.bySemantic.get(semKey)!;
-  }
+if (semKey && index.bySemantic.has(semKey)) {
+  return index.bySemantic.get(semKey)!;
+}
 
-  return null;
+// 5. Bancolombia duplicate aliases.
+// Only collapse the transaction when the bank produced
+// two DIFFERENT descriptions for the same ATM/Hall movement.
+const aliasKey = getBankAliasFamily(tx);
+
+if (aliasKey) {
+  const candidates = index.byBankAlias.get(aliasKey) || [];
+  const currentDesc = normalizeDupDescription(tx.descripcion);
+
+  const aliasDuplicate = candidates.find(candidate => {
+    const candidateDesc = normalizeDupDescription(candidate.descripcion);
+
+    return candidateDesc !== currentDesc;
+  });
+
+  if (aliasDuplicate) {
+    return aliasDuplicate;
+  }
+}
+
+return null;
 }
 
 export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number; duplicateIdsToRemove: string[] } {
@@ -1042,6 +1081,16 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
       if (cKey) index.byComprobante.set(cKey, merged);
       const sKey = getSemanticKey(merged);
       if (sKey) index.bySemantic.set(sKey, merged);
+      const aliasKey = getBankAliasFamily(merged);
+if (aliasKey) {
+  const candidates = index.byBankAlias.get(aliasKey) || [];
+
+  if (!candidates.some(c => c.id === merged.id)) {
+    candidates.push(merged);
+  }
+
+  index.byBankAlias.set(aliasKey, candidates);
+}
     } else {
       cleaned.push(tx);
       if (tx.id) index.byId.set(tx.id, tx);
@@ -1050,6 +1099,13 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
       if (compKey) index.byComprobante.set(compKey, tx);
       const semKey = getSemanticKey(tx);
       if (semKey) index.bySemantic.set(semKey, tx);
+      const aliasKey = getBankAliasFamily(tx);
+
+if (aliasKey) {
+  const candidates = index.byBankAlias.get(aliasKey) || [];
+  candidates.push(tx);
+  index.byBankAlias.set(aliasKey, candidates);
+}
     }
   }
 
