@@ -16,7 +16,7 @@ import {
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall, ReportConfig, SystemConfig } from './types';
 import { getColombiaDateTime } from './utils/formato';
-import { isRealComprobante } from './utils/llave-unica';
+import { isRealComprobante, normalizarCuenta } from './utils/llave-unica';
 import { esMovimientoIrrelevante } from './utils/parser-excel';
 
 // TEMPORARY EMERGENCY FIRESTORE PROJECT (Spark)
@@ -227,7 +227,7 @@ export function initializeRealtimeListeners() {
   // 2. Transactions listener
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
     // Cleaned transactions list
-    const cleaned: Transaction[] = [];
+    const rawList: Transaction[] = [];
     const irrelevantDocIds: string[] = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as Transaction;
@@ -239,7 +239,7 @@ export function initializeRealtimeListeners() {
       if (esMovimientoIrrelevante(tx.valor, tx.descripcion)) {
         irrelevantDocIds.push(docSnap.id);
       } else {
-        cleaned.push(tx);
+        rawList.push(tx);
       }
     });
 
@@ -260,28 +260,27 @@ export function initializeRealtimeListeners() {
       })();
     }
 
-    // Ensure the 2nd distinct $50,400 transaction is present in PENDING state if missing
-    const hasSecond50400 = cleaned.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764_o1');
-    if (!hasSecond50400 && cleaned.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764')) {
-      const secondTx: Transaction = {
-        id: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
-        llaveUnica: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
-        fecha: '2026-08-28',
-        hora: '12:05:58',
-        descripcion: 'PAGO QR CLAUDIA PATRICIA TOBON',
-        valor: 50400,
-        cuenta: '101-724768-07',
-        sede: 'Naranjal',
-        identificada: false,
-        fechaCarga: '2026-08-28 12:05:58',
-        esHistorico: false,
-        comprobante: '90516764',
-        esQR: true
-      };
-      cleaned.push(secondTx);
+    // Deduplicate any duplicate documents in Firestore
+    const { cleaned, duplicateIdsToRemove } = deduplicateTransactionList(rawList);
+
+    // Clean up duplicate doc IDs in Firestore in background
+    if (duplicateIdsToRemove && duplicateIdsToRemove.length > 0) {
+      (async () => {
+        try {
+          for (let i = 0; i < duplicateIdsToRemove.length; i += 400) {
+            const b = writeBatch(db);
+            duplicateIdsToRemove.slice(i, i + 400).forEach(id => {
+              b.delete(doc(db, 'transactions', id));
+            });
+            await b.commit();
+          }
+        } catch (e) {
+          console.warn('[Firestore] Auto-purging duplicate documents failed:', e);
+        }
+      })();
     }
 
-    if (cleaned.length > 0) {
+    if (cleaned.length > 0 || snapshot.empty) {
       // Sort: latest dates first
       cleaned.sort((a, b) => {
         const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
@@ -797,26 +796,8 @@ export function getTransactions(): Transaction[] {
     const list = JSON.parse(data) as Transaction[];
     if (Array.isArray(list)) {
       const filtered = list.filter(t => !esMovimientoIrrelevante(t.valor, t.descripcion));
-      const hasSecond50400 = filtered.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764_o1');
-      if (!hasSecond50400 && filtered.some(t => t.id === 'tx_10172476807_20260828_v50400_00_c90516764')) {
-        const secondTx: Transaction = {
-          id: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
-          llaveUnica: 'tx_10172476807_20260828_v50400_00_c90516764_o1',
-          fecha: '2026-08-28',
-          hora: '12:05:58',
-          descripcion: 'PAGO QR CLAUDIA PATRICIA TOBON',
-          valor: 50400,
-          cuenta: '101-724768-07',
-          sede: 'Naranjal',
-          identificada: false,
-          fechaCarga: '2026-08-28 12:05:58',
-          esHistorico: false,
-          comprobante: '90516764',
-          esQR: true
-        };
-        filtered.push(secondTx);
-      }
-      return filtered;
+      const { cleaned } = deduplicateTransactionList(filtered);
+      return cleaned;
     }
     return [];
   } catch (e) {
@@ -871,35 +852,88 @@ export function saveUploadBatches(batches: UploadBatch[]) {
 // DEDUPLICATION ENGINE
 // ----------------------------------------------------
 export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): boolean {
-  // 1. Exact ID match -> DEFINITELY DUPLICATE
-  if (tx1.id && tx2.id && tx1.id === tx2.id) {
-    return true;
-  }
-  // 2. Exact LlaveUnica match -> DEFINITELY DUPLICATE
-  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica === tx2.llaveUnica) {
-    return true;
+  if (tx1.id && tx2.id && tx1.id === tx2.id) return true;
+  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica === tx2.llaveUnica) return true;
+
+  // Real Comprobante match
+  if (isRealComprobante(tx1.comprobante) && isRealComprobante(tx2.comprobante)) {
+    const c1 = String(tx1.comprobante).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const c2 = String(tx2.comprobante).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (
+      c1 === c2 &&
+      normalizarCuenta(tx1.cuenta) === normalizarCuenta(tx2.cuenta) &&
+      (tx1.fecha || '').replace(/[-/]/g, '') === (tx2.fecha || '').replace(/[-/]/g, '') &&
+      Math.abs(Number(tx1.valor || 0) - Number(tx2.valor || 0)) < 0.01
+    ) {
+      return true;
+    }
   }
 
-  // Under no other conditions should we assume two transactions are duplicates.
-  // Each row in the bank statement represents a real and distinct transfer/payment.
+  // Semantic timestamp match
+  let h1 = (tx1.hora || '').replace(/[:\s]/g, '');
+  let h2 = (tx2.hora || '').replace(/[:\s]/g, '');
+  if (h1 === '120000') h1 = '';
+  if (h2 === '120000') h2 = '';
+  if (h1 && h2 && h1.length >= 4 && h1 === h2) {
+    const d1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
+    const d2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
+    if (
+      d1 === d2 &&
+      normalizarCuenta(tx1.cuenta) === normalizarCuenta(tx2.cuenta) &&
+      (tx1.fecha || '').replace(/[-/]/g, '') === (tx2.fecha || '').replace(/[-/]/g, '') &&
+      Math.abs(Number(tx1.valor || 0) - Number(tx2.valor || 0)) < 0.01
+    ) {
+      return true;
+    }
+  }
+
   return false;
 }
 
-// Fast O(1) Transaction Indexing Engine for Hyper-fast Deduplication
+// Fast O(1) Transaction Indexing Engine for Deduplication
 interface TransactionIndex {
   byId: Map<string, Transaction>;
   byLlaveUnica: Map<string, Transaction>;
+  byComprobante: Map<string, Transaction>;
+  bySemantic: Map<string, Transaction>;
+}
+
+function getComprobanteKey(tx: Transaction): string | null {
+  if (!isRealComprobante(tx.comprobante)) return null;
+  const nCuenta = normalizarCuenta(tx.cuenta);
+  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
+  const nValor = Number(tx.valor || 0).toFixed(2);
+  const nComp = String(tx.comprobante).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!nComp || nComp.length < 3) return null;
+  return `comp_${nCuenta}_${nFecha}_${nValor}_${nComp}`;
+}
+
+function getSemanticKey(tx: Transaction): string | null {
+  const nCuenta = normalizarCuenta(tx.cuenta);
+  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
+  let nHora = (tx.hora || '').replace(/[:\s]/g, '').trim();
+  if (nHora === '120000') nHora = '';
+  if (!nHora || nHora.length < 4) return null;
+  const nValor = Number(tx.valor || 0).toFixed(2);
+  const nDesc = (tx.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 25);
+  return `sem_${nCuenta}_${nFecha}_${nHora}_${nValor}_${nDesc}`;
 }
 
 function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
   const index: TransactionIndex = {
     byId: new Map(),
-    byLlaveUnica: new Map()
+    byLlaveUnica: new Map(),
+    byComprobante: new Map(),
+    bySemantic: new Map()
   };
 
   for (const tx of txs) {
     if (tx.id) index.byId.set(tx.id, tx);
     if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
+    const compKey = getComprobanteKey(tx);
+    if (compKey) index.byComprobante.set(compKey, tx);
+    const semKey = getSemanticKey(tx);
+    if (semKey) index.bySemantic.set(semKey, tx);
   }
 
   return index;
@@ -914,6 +948,18 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
   // 2. Check exact LlaveUnica
   if (tx.llaveUnica && index.byLlaveUnica.has(tx.llaveUnica)) {
     return index.byLlaveUnica.get(tx.llaveUnica)!;
+  }
+
+  // 3. Real Comprobante match
+  const compKey = getComprobanteKey(tx);
+  if (compKey && index.byComprobante.has(compKey)) {
+    return index.byComprobante.get(compKey)!;
+  }
+
+  // 4. Semantic match (with specific time)
+  const semKey = getSemanticKey(tx);
+  if (semKey && index.bySemantic.has(semKey)) {
+    return index.bySemantic.get(semKey)!;
   }
 
   return null;
@@ -934,9 +980,11 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
                               (isRealComprobante(existing.comprobante) ? existing.comprobante : null) ||
                               tx.comprobante || existing.comprobante || undefined;
       const bestOficina = tx.oficina || existing.oficina || undefined;
+      const bestHora = (tx.hora && tx.hora !== '12:00:00') ? tx.hora : (existing.hora || tx.hora || '');
 
       const merged: Transaction = {
         ...existing,
+        hora: bestHora,
         identificada: isNowIdentified,
         esHistorico: existing.esHistorico && tx.esHistorico,
         comprobante: bestComprobante,
@@ -960,10 +1008,18 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
 
       index.byId.set(merged.id, merged);
       if (merged.llaveUnica) index.byLlaveUnica.set(merged.llaveUnica, merged);
+      const cKey = getComprobanteKey(merged);
+      if (cKey) index.byComprobante.set(cKey, merged);
+      const sKey = getSemanticKey(merged);
+      if (sKey) index.bySemantic.set(sKey, merged);
     } else {
       cleaned.push(tx);
       if (tx.id) index.byId.set(tx.id, tx);
       if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
+      const compKey = getComprobanteKey(tx);
+      if (compKey) index.byComprobante.set(compKey, tx);
+      const semKey = getSemanticKey(tx);
+      if (semKey) index.bySemantic.set(semKey, tx);
     }
   }
 

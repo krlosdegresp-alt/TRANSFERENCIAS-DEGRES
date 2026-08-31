@@ -1,4 +1,17 @@
 /**
+ * Normalizes any account string or representation into a canonical digits format.
+ */
+export function normalizarCuenta(cuenta?: string): string {
+  if (!cuenta) return '0000';
+  const clean = String(cuenta).toLowerCase().trim();
+  const digits = clean.replace(/\D/g, '');
+  if (digits.includes('6519') || clean.includes('guayabal')) return '10172476519';
+  if (digits.includes('0916') || clean.includes('sabaneta')) return '10172470916';
+  if (digits.includes('6807') || clean.includes('naranjal')) return '10172476807';
+  return digits.slice(-12) || clean.substring(0, 15) || '0000';
+}
+
+/**
  * Checks whether a comprobante string is a genuine, unique bank voucher number
  * and not a generic placeholder/dummy code (such as '000000', '999999', '0', 'N/A', etc.).
  */
@@ -41,8 +54,8 @@ export function generarLlaveUnica(
   comprobante?: string,
   ocurr_idx?: number
 ): string {
-  // Normalize account (keep only digits or last 4 if full account isn't available)
-  const normCuenta = (cuenta || '0000').replace(/\D/g, '').slice(-12) || '0000';
+  // Normalize account canonical format
+  const normCuenta = normalizarCuenta(cuenta);
   
   // Normalize date (YYYY-MM-DD or similar) -> strip separators
   const normFecha = (fecha || '').replace(/[-/]/g, '').trim();
