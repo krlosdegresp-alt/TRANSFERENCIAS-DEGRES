@@ -896,6 +896,7 @@ interface TransactionIndex {
   byLlaveUnica: Map<string, Transaction>;
   byComprobante: Map<string, Transaction>;
   bySemantic: Map<string, Transaction>;
+  byBankAlias: Map<string, Transaction[]>;
 }
 
 function getComprobanteKey(tx: Transaction): string | null {
@@ -917,6 +918,35 @@ function getSemanticKey(tx: Transaction): string | null {
   const nValor = Number(tx.valor || 0).toFixed(2);
   const nDesc = (tx.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 25);
   return `sem_${nCuenta}_${nFecha}_${nHora}_${nValor}_${nDesc}`;
+}
+function normalizeDupDescription(desc?: string): string {
+  return String(desc || '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]/g, '')
+    .trim();
+}
+
+function getBankAliasFamily(tx: Transaction): string | null {
+  const desc = normalizeDupDescription(tx.descripcion);
+
+  // Bancolombia puede representar el mismo depósito ATM/Hall
+  // con dos descripciones diferentes.
+  const isAtmHall =
+    desc.includes('CONSIGLOCALCAJATMMFHALL') ||
+    desc.includes('CONSIGNACIONATMMFHALLAUTO');
+
+  if (!isAtmHall) return null;
+
+  const cuenta = normalizarCuenta(tx.cuenta);
+  const fecha = String(tx.fecha || '').replace(/[-/]/g, '');
+  const valor = Number(tx.valor || 0).toFixed(2);
+  const oficina = String(tx.oficina || '')
+    .replace(/[^0-9A-Z]/gi, '')
+    .toUpperCase();
+
+  return `atm_hall_${cuenta}_${fecha}_${valor}_${oficina}`;
 }
 
 function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
