@@ -4,15 +4,18 @@ import { generarLlaveUnica } from './llave-unica';
 
 /**
  * Parses numeric strings formatted with Colombian conventions (dots for thousands, commas for decimals).
- * It preserves the exact decimal value safely.
+ * It preserves the exact decimal value safely and returns absolute positive magnitude.
  */
 export function parseColombianNumber(val: any): number {
   if (val === undefined || val === null) return NaN;
-  if (typeof val === 'number') return val;
+  if (typeof val === 'number') return Math.abs(val);
 
-  // Remove currency symbols, common letters, and spaces
-  let str = String(val).trim().replace(/[$\s]/g, '');
+  // Remove currency symbols, parentheses for negative numbers, common letters, and spaces
+  let str = String(val).trim().replace(/[$\s()]/g, '');
   if (!str) return NaN;
+
+  // Strip leading minus sign to ensure positive absolute value
+  str = str.replace(/^-/, '');
 
   const hasComma = str.includes(',');
   const hasDot = str.includes('.');
@@ -52,7 +55,8 @@ export function parseColombianNumber(val: any): number {
     }
   }
 
-  return parseFloat(str);
+  const num = Math.abs(parseFloat(str));
+  return isNaN(num) ? NaN : num;
 }
 
 /**
@@ -256,8 +260,9 @@ export function detectarSede(cuentaStr: string): Sede {
  * - Preserves all valid bank transactions and payments over $1,000 COP (including provider payments, disbursements, transfers, etc.).
  */
 export function esMovimientoIrrelevante(valor: number, descripcion: string, oficina?: string): boolean {
-  // Discard anything less than $1,000 COP or invalid/negative values
-  if (isNaN(valor) || valor < 1000) {
+  const absVal = Math.abs(Number(valor || 0));
+  // Discard anything less than $1,000 COP or invalid values
+  if (isNaN(absVal) || absVal < 1000) {
     return true;
   }
   

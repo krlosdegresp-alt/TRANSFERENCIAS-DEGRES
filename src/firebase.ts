@@ -210,57 +210,22 @@ export function initializeRealtimeListeners() {
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
     // Cleaned transactions list
     const rawList: Transaction[] = [];
-    const irrelevantDocIds: string[] = [];
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as Transaction;
+      const parsedVal = Math.abs(Number(data.valor || 0));
       const tx: Transaction = {
         ...data,
+        valor: isNaN(parsedVal) ? 0 : parsedVal,
         id: data.id || docSnap.id,
         llaveUnica: data.llaveUnica || data.id || docSnap.id
       };
-      if (esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina)) {
-        irrelevantDocIds.push(docSnap.id);
-      } else {
+      if (!esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina)) {
         rawList.push(tx);
       }
     });
 
-    // Clean up any residual irrelevant documents in Firestore in background
-    if (irrelevantDocIds.length > 0) {
-      (async () => {
-        try {
-          for (let i = 0; i < irrelevantDocIds.length; i += 400) {
-            const b = writeBatch(db);
-            irrelevantDocIds.slice(i, i + 400).forEach(id => {
-              b.delete(doc(db, 'transactions', id));
-            });
-            await b.commit();
-          }
-        } catch (e) {
-          console.warn('[Firestore] Auto-purging irrelevant documents failed:', e);
-        }
-      })();
-    }
-
-    // Deduplicate any duplicate documents in Firestore
-    const { cleaned, duplicateIdsToRemove } = deduplicateTransactionList(rawList);
-
-    // Clean up duplicate doc IDs in Firestore in background
-    if (duplicateIdsToRemove && duplicateIdsToRemove.length > 0) {
-      (async () => {
-        try {
-          for (let i = 0; i < duplicateIdsToRemove.length; i += 400) {
-            const b = writeBatch(db);
-            duplicateIdsToRemove.slice(i, i + 400).forEach(id => {
-              b.delete(doc(db, 'transactions', id));
-            });
-            await b.commit();
-          }
-        } catch (e) {
-          console.warn('[Firestore] Auto-purging duplicate documents failed:', e);
-        }
-      })();
-    }
+    // Deduplicate any duplicate documents representation in memory
+    const { cleaned } = deduplicateTransactionList(rawList);
 
     if (cleaned.length > 0 || snapshot.empty) {
       // Sort: latest dates first
