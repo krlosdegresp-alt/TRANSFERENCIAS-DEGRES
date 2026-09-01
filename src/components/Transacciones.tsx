@@ -143,7 +143,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   // Base filter (without status filter) for widgets and reactive totals
   const baseFilteredTransactions = transactions.filter(tx => {
     if (tx.esHistorico) return false;
-    if (esMovimientoIrrelevante(tx.valor, tx.descripcion)) return false;
+    if (esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina)) return false;
 
     const matchesSearch = 
       tx.llaveUnica.toLowerCase().includes(searchTerm.toLowerCase()) ||

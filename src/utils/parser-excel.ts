@@ -252,10 +252,22 @@ export function detectarSede(cuentaStr: string): Sede {
  * Checks if a transaction description corresponds to bank taxes, commissions, service fees,
  * provider payments, payroll disbursements, or negative/irrelevant debits.
  */
-export function esMovimientoIrrelevante(valor: number, descripcion: string): boolean {
+export function esMovimientoIrrelevante(valor: number, descripcion: string, oficina?: string): boolean {
   if (valor === 0 || isNaN(valor) || valor < 0) return true;
   
-  const rawDesc = String(descripcion || '');
+  // If oficina contains 'cajera', it's a corrupted/misparsed closure row, not a valid bank transaction
+  if (oficina && String(oficina).toLowerCase().includes('cajera')) {
+    return true;
+  }
+
+  const rawDesc = String(descripcion || '').trim();
+  if (!rawDesc) return true;
+
+  // If description is just a short number (e.g. "1", "2", "3", "5" from cierres columns)
+  if (/^\d{1,3}$/.test(rawDesc)) {
+    return true;
+  }
+
   // Normalize string: uppercase, remove accents/diacritics, collapse whitespace
   const desc = rawDesc
     .toUpperCase()
@@ -482,8 +494,40 @@ export function parseExcelBankFile(
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) continue;
 
+    // Skip sheets that are clearly closures, logs, user tables, or summaries
+    const lowerSheet = sheetName.trim().toLowerCase();
+    if (
+      lowerSheet.includes('cierre') || 
+      lowerSheet.includes('auditoria') || 
+      lowerSheet.includes('audit') || 
+      lowerSheet.includes('usuario') || 
+      lowerSheet.includes('user') || 
+      lowerSheet.includes('resumen') ||
+      lowerSheet.includes('config') ||
+      lowerSheet.includes('log')
+    ) {
+      continue;
+    }
+
     const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
     if (!rawRows || rawRows.length === 0) continue;
+
+    // Check if sheet rows contain cash closures table headers (e.g. Sede, Fecha, Cajera, Declarado, Aplicativo, Coincide)
+    const isCierresSheet = rawRows.slice(0, 10).some(row =>
+      row && row.some(cell => {
+        const str = String(cell || '').trim().toLowerCase();
+        return (
+          str.includes('cajera') || 
+          str.includes('declarado') || 
+          str.includes('total identificado') || 
+          str.includes('total aplicativo') ||
+          (str.includes('cierre') && str.includes('caja'))
+        );
+      })
+    );
+    if (isCierresSheet) {
+      continue;
+    }
 
     // Check if this sheet is an exported report from our application
     let isExportedReport = false;
@@ -760,11 +804,6 @@ export function parseExcelBankFile(
       // Parse Description
       const desc = String(row[descColIdx] || 'TRANSFERENCIA BANCARIA').trim();
 
-      // Discard tax or debit movements
-      if (esMovimientoIrrelevante(valor, desc)) {
-        continue;
-      }
-
       // Parse Date & Time
       const fecha = parseExcelDate(row[fechaColIdx]);
       let hora = '';
@@ -817,6 +856,16 @@ export function parseExcelBankFile(
       // Parse Oficina & Comprobante
       const oficina = String(row[oficinaColIdx] || '').trim();
       const comprobante = String(row[comprobanteColIdx] || '').trim();
+
+      // Discard corrupted rows where oficina contains cajera or if movement is irrelevant
+      if (oficina && (oficina.toLowerCase().includes('cajera') || oficina.toLowerCase().includes('(cajera)'))) {
+        continue;
+      }
+
+      // Discard tax, fee, commission, or irrelevant movements
+      if (esMovimientoIrrelevante(valor, desc, oficina)) {
+        continue;
+      }
 
       // Generate stable unique signature
       const sig = `${cuenta}_${fecha}_${valor}_${desc.toUpperCase()}_${comprobante}_${hora}`;

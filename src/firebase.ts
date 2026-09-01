@@ -220,7 +220,7 @@ export function initializeRealtimeListeners() {
         id: data.id || docSnap.id,
         llaveUnica: data.llaveUnica || data.id || docSnap.id
       };
-      if (esMovimientoIrrelevante(tx.valor, tx.descripcion)) {
+      if (esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina)) {
         irrelevantDocIds.push(docSnap.id);
       } else {
         rawList.push(tx);
@@ -672,7 +672,7 @@ export function getTransactions(): Transaction[] {
   try {
     const list = JSON.parse(data) as Transaction[];
     if (Array.isArray(list)) {
-      const filtered = list.filter(t => !esMovimientoIrrelevante(t.valor, t.descripcion));
+      const filtered = list.filter(t => !esMovimientoIrrelevante(t.valor, t.descripcion, t.oficina));
       const { cleaned } = deduplicateTransactionList(filtered);
       return cleaned;
     }
@@ -1023,7 +1023,7 @@ export async function uploadBankTransactions(
   setDoc(doc(db, 'configs', 'wipeState'), { wipeTime: 0 }).catch(() => {});
 
   // 0. Filter out irrelevant movements (provider payments, payroll, commissions, bank service charges, taxes)
-  const filteredInputTxs = newTxs.filter(tx => !esMovimientoIrrelevante(tx.valor, tx.descripcion));
+  const filteredInputTxs = newTxs.filter(tx => !esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina));
 
   // 1. Deduplicate incoming batch first
   const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(filteredInputTxs);
