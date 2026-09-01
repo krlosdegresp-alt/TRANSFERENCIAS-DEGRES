@@ -31,9 +31,7 @@ const firebaseConfig = {
 
 // Initialize single Firebase application
 const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-}, 'ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212');
+export const db = getFirestore(app, 'ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212');
 export const storage = getStorage(app);
 
 // Predefined accounts for login
@@ -1114,17 +1112,21 @@ export async function uploadBankTransactions(
   try {
     let downloadUrl = '';
     if (fileBlob) {
-      try {
-        const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
-        const uploadTask = uploadBytes(storageRef, fileBlob);
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Storage upload timeout')), 2500)
-        );
-        const snapshot = await Promise.race([uploadTask, timeoutPromise]);
-        downloadUrl = await getDownloadURL(snapshot.ref);
-      } catch (stgErr) {
-        console.warn("Firebase Storage upload skipped or timed out, proceeding with db save:", stgErr);
-      }
+      // Perform storage upload in non-blocking manner without throwing alarming timeout warnings
+      (async () => {
+        try {
+          const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
+          const snapshot = await uploadBytes(storageRef, fileBlob);
+          if (snapshot && snapshot.ref) {
+            const url = await getDownloadURL(snapshot.ref);
+            if (url) {
+              await updateDoc(doc(db, 'batches', batchId), { archivoUrl: url }).catch(() => {});
+            }
+          }
+        } catch {
+          // File storage is an optional binary backup; silent fallback
+        }
+      })();
     }
 
     // Save modified or new transactions to Firestore in chunks of 500 concurrently

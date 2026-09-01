@@ -249,11 +249,17 @@ export function detectarSede(cuentaStr: string): Sede {
 }
 
 /**
- * Checks if a transaction description corresponds to bank taxes, commissions, service fees,
- * provider payments, payroll disbursements, or negative/irrelevant debits.
+ * Checks if a transaction is irrelevant.
+ * As requested:
+ * - Omits movements with value less than $1,000 COP (e.g. $236 bank canal fees, micro-charges, zero/negative balances).
+ * - Omits corrupted rows from cash closure sheets (where oficina contains 'cajera' or description is a short row number).
+ * - Preserves all valid bank transactions and payments over $1,000 COP (including provider payments, disbursements, transfers, etc.).
  */
 export function esMovimientoIrrelevante(valor: number, descripcion: string, oficina?: string): boolean {
-  if (valor === 0 || isNaN(valor) || valor < 0) return true;
+  // Discard anything less than $1,000 COP or invalid/negative values
+  if (isNaN(valor) || valor < 1000) {
+    return true;
+  }
   
   // If oficina contains 'cajera', it's a corrupted/misparsed closure row, not a valid bank transaction
   if (oficina && String(oficina).toLowerCase().includes('cajera')) {
@@ -278,8 +284,8 @@ export function esMovimientoIrrelevante(valor: number, descripcion: string, ofic
 
   if (!desc) return false;
 
-  const patternsToDiscard = [
-    // Taxes and fiscal retentions
+  // Pure bank taxes / GMF
+  const pureTaxPatterns = [
     '4X1.000',
     '4X1000',
     '4 X 1000',
@@ -289,165 +295,10 @@ export function esMovimientoIrrelevante(valor: number, descripcion: string, ofic
     'RETEFUENTE',
     'RETEICA',
     'RETEIVA',
-    'RETE FUENTE',
-    'RETE ICA',
-    'RETE IVA',
-    'RETENCION EN LA FUENTE',
-    'IMPUESTO GOBIERNO',
-    'IMPUESTO AL VALOR AGREGADO',
-
-    // Bank fees, commissions, interest, debits, savings yields
-    'ABONO INTERESES AHORROS',
-    'ABONO INTERESES',
-    'ABONO INTERES',
-    'ABONO DE INTERESES',
-    'ABONO DE INTERES',
-    'INTERESES AHORROS',
-    'INTERES AHORROS',
-    'INTERESES DE AHORROS',
-    'INTERES DE AHORROS',
-    'INTERESES GANADOS',
-    'INTERES GANADO',
-    'INTERESES S/SALDO',
-    'INTERES S/SALDO',
-    'INTERES SOBRE SALDO',
-    'INTERESES SOBRE SALDO',
-    'ABONO RENDIMIENTOS',
-    'ABONO RENDIMIENTO',
-    'ABONO POR RENDIMIENTOS',
-    'RENDIMIENTOS FINANCIEROS',
-    'RENDIMIENTO FINANCIERO',
-    'RENDIMIENTOS AHORROS',
-    'RENDIMIENTO AHORROS',
-    'RENDIMIENTOS CTA',
-    'RENDIMIENTO CTA',
-    'RENDIMIENTOS',
-    'RENDIMIENTO',
-    'AJUSTE DE INTERESES',
-    'AJUSTE INTERESES',
-    'AJUSTE INTERES',
-    'COBRO DE IVA',
-    'COBRO COMISION',
-    'COBRO IVA',
-    'IVA COMISION',
-    'IVA TRANS',
-    'IVA SERVICIO',
-    'IVA BANCARIO',
-    'IVA PAGO',
-    'COMISION',
-    'COMIS.',
-    'CUOTA DE MANEJO',
-    'CUOTA MANEJO',
-    'CUOTA MENSUAL',
-    'COBRO INTERES',
-    'INTERES DEBITO',
-    'INTERES MORA',
-    'INTERES CORRIENTE',
-    'SALDO EN CONTRA',
-    'EGRESO',
-    'DEBITO AUTOMATICO',
-    'NOTA DEBITO',
-    'CARGO DEBITO',
-
-    // Banking plan fees, canal fees, account plan charges
-    'CUOTA PLAN CANAL NEGOCIOS',
-    'IVA CUOTA PLAN CANAL NEGOCIOS',
-    'CUOTA PLAN CANAL',
-    'IVA CUOTA PLAN CANAL',
-    'CUOTA PLAN',
-    'IVA CUOTA PLAN',
-    'PLAN CANAL NEGOCIOS',
-    'CUOTA CANAL NEGOCIOS',
-    'IVA PLAN CANAL NEGOCIOS',
-    'CANAL NEGOCIOS',
-
-    // Service fees for supplier/payroll portals
-    'SERVICIO PAGO A PROVEEDORES',
-    'SERVICIO PAGO PROVEEDORES',
-    'SERVICIO PAGO A PROV',
-    'SERVICIO PAGO PROV',
-    'SERV PAGO PROV',
-    'SERV. PAGO PROV',
-    'SERV PAGO A PROVE',
-    'SERV PAGO A PROV',
-    'SERVICIO DE PAGO A PROVEEDORES',
-    'SERVICIO DE PAGO A PROV',
-
-    // Outbound payroll payments and service fees for payroll
-    'PAGO A NOMIN', // Matches "PAGO A NOMIN ANA PIEDAD CADA", "PAGO A NOMINA", etc.
-    'PAGO A NOM',
-    'PAGO NOMIN',
-    'PAGO NOM',
-    'PAG A NOMIN',
-    'PAG A NOM',
-    'PAG NOMIN',
-    'PAG NOM',
-    'PG NOMIN',
-    'PG NOM',
-    'SERVICIO PAGO DE NOMINA',
-    'SERVICIO PAGO A NOMINA',
-    'SERVICIO PAGO A NOMIN',
-    'SERVICIO PAGO NOMINA',
-    'SERVICIO PAGO NOMIN',
-    'SERVICIO DE NOMINA',
-    'SERVICIO NOMINA',
-    'SERV PAGO NOMINA',
-    'SERV PAGO NOMIN',
-    'SERV PAGO A NOMIN',
-    'SERV PAGO A NOM',
-    'SERV NOMINA',
-    'PAGO DE NOMINA',
-    'PAGO DE NOMIN',
-    'PAGO NOMINA',
-    'PAG NOMINA',
-    'PAGO ELECTRONICO NOMINA',
-    'PAGO ELEC NOMINA',
-
-    // Third-party payment services and funds dispersions
-    'PAGO A TERC',
-    'PAG A TERC',
-    'PAGO TERC',
-    'PAG TERC',
-    'SERVICIO PAGO A TERCEROS',
-    'SERVICIO PAGO A TERC',
-    'SERVICIO PAGO TERCEROS',
-    'SERVICIO PAGO TERC',
-    'PAGO A TERCEROS',
-    'PAGO TERCEROS',
-    'DISPERSION NOMINA',
-    'DISPERSION DE NOMINA',
-    'DISPERSION PROVEEDORES',
-    'DISPERSION DE FONDOS',
-    'DISPERSION FONDOS',
-    'DISPERSION',
-
-    // Service fees / charges
-'CARGO POR SERVICIO',
-'CARGO SERVICIO',
-'COBRO SERVICIO',
-'COBRO DE SERVICIO',
-'COBRO POR SERVICIO',
-'TARIFA SERVICIO',
-'COSTO SERVICIO',
-
-'SERVICIO POR PAGOS',
-'SERVICIO POR PAGO',
-'SERVICIO POR PAGOS A',
-
-'SERVICIO DE RECAUDO',
-'SERVICIO PAGO',
-'SERV PAGO',
-'SERV. PAGO',
-'SERVICIO DE PAGO',
-
-    // Outbound transfers
-    'TRANSFERENCIA SALIENTE',
-    'TRANSFERENCIA ENVIADA',
-    'TRASLADO DE FONDOS',
-    'TRASLADO FONDOS'
+    'RETENCION EN LA FUENTE'
   ];
 
-  return patternsToDiscard.some(pattern => desc.includes(pattern));
+  return pureTaxPatterns.some(pattern => desc.includes(pattern));
 }
 
 /**
