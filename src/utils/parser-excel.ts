@@ -337,17 +337,19 @@ export function esMovimientoIrrelevante(valor: number, descripcion: string): boo
     'NOTA DEBITO',
     'CARGO DEBITO',
 
-    // Outbound supplier payments and service fees for supplier payments
-    'PAGO A PROVE', // Matches "PAGO A PROVEEDORES", "PAGO A PROVE [nombre]", "PAGO A PROVEEDOR", etc.
-    'PAGO A PROV',
-    'PAGO PROVE',   // Matches "PAGO PROVEEDORES", "PAGO PROVEEDOR", etc.
-    'PAGO PROV',
-    'PAG A PROVE',
-    'PAG A PROV',
-    'PAG PROVE',
-    'PAG PROV',
-    'PG PROVE',
-    'PG PROV',
+    // Banking plan fees, canal fees, account plan charges
+    'CUOTA PLAN CANAL NEGOCIOS',
+    'IVA CUOTA PLAN CANAL NEGOCIOS',
+    'CUOTA PLAN CANAL',
+    'IVA CUOTA PLAN CANAL',
+    'CUOTA PLAN',
+    'IVA CUOTA PLAN',
+    'PLAN CANAL NEGOCIOS',
+    'CUOTA CANAL NEGOCIOS',
+    'IVA PLAN CANAL NEGOCIOS',
+    'CANAL NEGOCIOS',
+
+    // Service fees for supplier/payroll portals
     'SERVICIO PAGO A PROVEEDORES',
     'SERVICIO PAGO PROVEEDORES',
     'SERVICIO PAGO A PROV',
@@ -425,9 +427,6 @@ export function esMovimientoIrrelevante(valor: number, descripcion: string): boo
 'SERV PAGO',
 'SERV. PAGO',
 'SERVICIO DE PAGO',
-
-'PAGO DE PROV',
-'PAGO DE PROVE',
 
     // Outbound transfers
     'TRANSFERENCIA SALIENTE',
