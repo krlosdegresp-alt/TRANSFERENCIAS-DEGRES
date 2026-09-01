@@ -588,15 +588,15 @@ export function parseExcelBankFile(
           foundFecha = c;
         } else if (foundHora === -1 && (cellText.includes('hora') || cellText === 'time' || cellText.includes('horario'))) {
           foundHora = c;
-        } else if (foundValor === -1 && (cellText.includes('valor') || cellText.includes('monto') || cellText.includes('importe') || cellText.includes('credito') || cellText.includes('crédito') || cellText.includes('ingreso') || cellText.includes('abono') || cellText.includes('deposito') || cellText.includes('depósito') || cellText.includes('entrada') || cellText.includes('pago'))) {
-          foundValor = c;
-        } else if (foundDesc === -1 && (cellText.includes('descripc') || cellText.includes('detalle') || cellText.includes('concepto') || cellText.includes('movimiento') || cellText === 'desc' || cellText.includes('leyenda') || cellText.includes('transaccion') || cellText.includes('transacción'))) {
+        } else if (foundDesc === -1 && (cellText.includes('descripc') || cellText.includes('detalle') || cellText.includes('concepto') || cellText.includes('movimiento') || cellText === 'desc' || cellText.includes('leyenda') || cellText.includes('transaccion') || cellText.includes('transacción') || cellText.includes('motivo'))) {
           foundDesc = c;
-        } else if (foundOficina === -1 && (cellText.includes('oficina') || cellText.includes('sucursal') || cellText.includes('plaza') || cellText.includes('canal'))) {
+        } else if (foundValor === -1 && !cellText.includes('forma') && !cellText.includes('medio') && !cellText.includes('tipo') && (cellText.includes('valor') || cellText.includes('monto') || cellText.includes('importe') || cellText.includes('credito') || cellText.includes('crédito') || cellText.includes('ingreso') || cellText.includes('abono') || cellText.includes('deposito') || cellText.includes('depósito') || cellText.includes('entrada') || cellText === 'pago' || cellText.includes('vr.') || cellText.includes('vr ') || cellText.includes('vlr') || cellText.includes('pesos') || cellText.includes('cop'))) {
+          foundValor = c;
+        } else if (foundOficina === -1 && (cellText.includes('oficina') || cellText.includes('sucursal') || cellText.includes('plaza') || cellText.includes('canal') || cellText.includes('agencia') || cellText.includes('terminal'))) {
           foundOficina = c;
         } else if (foundCuenta === -1 && (cellText.includes('cuenta') || cellText.includes('cta') || cellText.includes('producto'))) {
           foundCuenta = c;
-        } else if (foundComprobante === -1 && (cellText.includes('comprobante') || cellText.includes('documento') || cellText.includes('doc') || cellText.includes('referencia') || cellText.includes('ref') || cellText.includes('nro') || cellText.includes('num'))) {
+        } else if (foundComprobante === -1 && (cellText.includes('comprobante') || cellText.includes('documento') || cellText.includes('doc') || cellText.includes('referencia') || cellText.includes('ref') || cellText.includes('nro') || cellText.includes('num') || cellText.includes('aut') || cellText.includes('recibo'))) {
           foundComprobante = c;
         }
       }
@@ -660,17 +660,27 @@ export function parseExcelBankFile(
 
       // Fallback scan across all row cells if valor isn't found at guessed valorColIdx
       if (isNaN(valor) || valor <= 0) {
+        let bestCandidate = 0;
         for (let colIdx = 0; colIdx < row.length; colIdx++) {
           if (colIdx === fechaColIdx) continue;
+          const candRaw = String(row[colIdx] || '').trim();
+          // Skip if cell looks like an account number (e.g., has hyphens or 10+ digits)
+          if (candRaw.includes('-') && candRaw.length > 7) continue;
+          
           const candidateVal = parseColombianNumber(row[colIdx]);
           if (!isNaN(candidateVal) && candidateVal > 0) {
-            const candStr = String(row[colIdx]).trim();
-            // Verify candidate is an actual currency amount and not a long document ID
-            if (candStr.length <= 13 && candidateVal < 1000000000) {
-              valor = candidateVal;
-              break;
+            if (candidateVal >= 1000 && candidateVal < 10000000000) {
+              // Prefer actual monetary value >= 1000 COP over small 3-digit branch codes like 236
+              if (bestCandidate === 0 || candidateVal > bestCandidate) {
+                bestCandidate = candidateVal;
+              }
+            } else if (bestCandidate === 0) {
+              bestCandidate = candidateVal;
             }
           }
+        }
+        if (bestCandidate > 0) {
+          valor = bestCandidate;
         }
       }
 
