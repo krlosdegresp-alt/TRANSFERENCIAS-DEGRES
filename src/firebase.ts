@@ -19,21 +19,8 @@ import { getColombiaDateTime } from './utils/formato';
 import { isRealComprobante, normalizarCuenta } from './utils/llave-unica';
 import { esMovimientoIrrelevante } from './utils/parser-excel';
 
-// TEMPORARY EMERGENCY FIRESTORE PROJECT (Spark)
-// Firestore is switched to TRANSFERENCIAS TEMP so the app can keep working
-// while billing on the original Firebase project is resolved.
-const tempFirebaseConfig = {
-  apiKey: "AIzaSyB7eOWtXid8H0MiATBO1-NBDdOAr5Y3yEg",
-  authDomain: "transferencias-temp.firebaseapp.com",
-  projectId: "transferencias-temp",
-  storageBucket: "transferencias-temp.firebasestorage.app",
-  messagingSenderId: "617081936030",
-  appId: "1:617081936030:web:540103eafedd2d799e038f"
-};
-
-// Keep the ORIGINAL project only for Firebase Storage so existing uploaded
-// files/receipts remain available. The quota problem is Firestore, not Storage.
-const legacyStorageConfig = {
+// Firebase configuration (Original project: gen-lang-client-0899368462)
+const firebaseConfig = {
   apiKey: "AIzaSyBlKnYrZy8nQj6KgP7qCW9k1F-QeCK2Oyo",
   authDomain: "gen-lang-client-0899368462.firebaseapp.com",
   projectId: "gen-lang-client-0899368462",
@@ -42,15 +29,12 @@ const legacyStorageConfig = {
   appId: "1:303118479370:web:d2c45dbd5796070b172ff3"
 };
 
-// Initialize temporary Firestore using the (default) database.
-const app = initializeApp(tempFirebaseConfig);
+// Initialize single Firebase application
+const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
-  experimentalAutoDetectLongPolling: true,
-});
-
-// Separate named app for the legacy Storage bucket.
-const legacyStorageApp = initializeApp(legacyStorageConfig, 'legacy-storage');
-export const storage = getStorage(legacyStorageApp);
+  experimentalForceLongPolling: true,
+}, 'ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212');
+export const storage = getStorage(app);
 
 // Predefined accounts for login
 export const PREDEFINED_USERS: User[] = [
@@ -439,94 +423,8 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// ONE-TIME EMERGENCY MIGRATION: copy this browser's cached data into
-// TRANSFERENCIAS TEMP before empty Firestore snapshots can overwrite local cache.
-const TEMP_CACHE_MIGRATION_MARKER = 'temp_firestore_cache_migrated_2026_08_28_v2';
-
-async function migrateLocalCacheToTempFirestore() {
-  if (typeof window === 'undefined') return;
-  if (localStorage.getItem(TEMP_CACHE_MIGRATION_MARKER) === 'done') return;
-
-  const cleanObject = (obj: any) => {
-    const out: Record<string, any> = {};
-    for (const [k, v] of Object.entries(obj || {})) {
-      if (v !== undefined) out[k] = v;
-    }
-    return out;
-  };
-
-  const writeArrayInChunks = async (collectionName: string, items: any[]) => {
-    const valid = items.filter(x => x && x.id);
-    for (let i = 0; i < valid.length; i += 400) {
-      const batch = writeBatch(db);
-      for (const item of valid.slice(i, i + 400)) {
-        batch.set(doc(db, collectionName, String(item.id)), cleanObject(item));
-      }
-      await batch.commit();
-    }
-    return valid.length;
-  };
-
-  try {
-    console.log('[TEMP MIGRATION] Starting local cache -> Firestore migration...');
-
-    const mappings = [
-      [STORAGE_USERS_KEY, 'users'],
-      [STORAGE_TRANS_KEY, 'transactions'],
-      [STORAGE_BATCHES_KEY, 'batches'],
-      [STORAGE_CIERRES_KEY, 'cierres'],
-      [STORAGE_LOGS_KEY, 'logs'],
-      [STORAGE_CHAT_KEY, 'chat'],
-      [STORAGE_VIDEOCALLS_KEY, 'videocalls'],
-    ] as const;
-
-    let total = 0;
-    for (const [storageKey, collectionName] of mappings) {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const count = await writeArrayInChunks(collectionName, parsed);
-          total += count;
-          console.log(`[TEMP MIGRATION] ${collectionName}: ${count} documents uploaded.`);
-        }
-      } catch (e) {
-        console.warn(`[TEMP MIGRATION] Could not migrate ${collectionName}:`, e);
-      }
-    }
-
-    const reportRaw = localStorage.getItem(STORAGE_REPORT_CONFIG_KEY);
-    if (reportRaw) {
-      try {
-        await setDoc(doc(db, 'configs', 'reports'), cleanObject(JSON.parse(reportRaw)));
-        console.log('[TEMP MIGRATION] reports config uploaded.');
-      } catch (e) { console.warn('[TEMP MIGRATION] reports config failed:', e); }
-    }
-
-    const systemRaw = localStorage.getItem(STORAGE_SYSTEM_CONFIG_KEY);
-    if (systemRaw) {
-      try {
-        const cfg = cleanObject(JSON.parse(systemRaw));
-        cfg.maintenanceMode = false;
-        await setDoc(doc(db, 'configs', 'system'), cfg);
-        console.log('[TEMP MIGRATION] system config uploaded.');
-      } catch (e) { console.warn('[TEMP MIGRATION] system config failed:', e); }
-    }
-
-    localStorage.setItem(TEMP_CACHE_MIGRATION_MARKER, 'done');
-    console.log(`[TEMP MIGRATION] COMPLETE. ${total} cached documents uploaded to TRANSFERENCIAS TEMP.`);
-  } catch (error) {
-    console.error('[TEMP MIGRATION] FAILED. Local cache was NOT marked as migrated:', error);
-  }
-}
-
-// Important: migrate first; only then attach real-time listeners so an empty
-// temporary database cannot erase the useful cache in this browser.
-migrateLocalCacheToTempFirestore().finally(async () => {
-  await repairTempUsersFromCanonicalList();
-  initializeRealtimeListeners();
-});
+// Initialize real-time listeners directly
+initializeRealtimeListeners();
 
 export function getSystemConfig(): SystemConfig {
   const data = localStorage.getItem(STORAGE_SYSTEM_CONFIG_KEY);
@@ -589,27 +487,6 @@ export async function setMaintenanceMode(
     );
   } catch (error) {
     console.error('Error updating system config in Firestore:', error);
-  }
-}
-
-// One-time emergency repair of the TEMP users collection.
-// It ONLY replaces 'users'; transactions, batches, logs and configs are untouched.
-const TEMP_CANONICAL_USERS_MARKER = 'temp_canonical_users_2026_08_28_v1';
-async function repairTempUsersFromCanonicalList() {
-  if (localStorage.getItem(TEMP_CANONICAL_USERS_MARKER)) return;
-  try {
-    console.log('[TEMP USERS] Replacing temporary users with the verified list...');
-    const snap = await getDocs(collection(db, 'users'));
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => batch.delete(d.ref));
-    PREDEFINED_USERS.forEach(u => batch.set(doc(db, 'users', u.id), u));
-    await batch.commit();
-    safeSetLocalStorage(STORAGE_USERS_KEY, JSON.stringify(PREDEFINED_USERS));
-    localStorage.setItem(TEMP_CANONICAL_USERS_MARKER, 'true');
-    console.log(`[TEMP USERS] COMPLETE. ${PREDEFINED_USERS.length} verified users written.`);
-    notifyListeners();
-  } catch (error) {
-    console.error('[TEMP USERS] Repair failed:', error);
   }
 }
 
@@ -869,6 +746,23 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
     }
   }
 
+  // Bank alias match (ONLY between the two DIFFERENT variants: CONSIG LOCAL CAJ ATM MF HALL vs CONSIGNACION ATM MF HALL AUTO)
+  const f1 = getBankAliasFamily(tx1.descripcion);
+  const f2 = getBankAliasFamily(tx2.descripcion);
+  if (
+    f1 &&
+    f2 &&
+    f1 !== f2 && // MUST BE DIFFERENT VARIANTS
+    normalizarCuenta(tx1.cuenta) === normalizarCuenta(tx2.cuenta) &&
+    (tx1.fecha || '').replace(/[-/]/g, '') === (tx2.fecha || '').replace(/[-/]/g, '') &&
+    Math.abs(Number(tx1.valor || 0) - Number(tx2.valor || 0)) < 0.01 &&
+    (tx1.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') ===
+      (tx2.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') &&
+    (tx1.oficina || '').trim().length > 0
+  ) {
+    return true;
+  }
+
   // Semantic timestamp match
   let h1 = (tx1.hora || '').replace(/[:\s]/g, '');
   let h2 = (tx2.hora || '').replace(/[:\s]/g, '');
@@ -890,13 +784,39 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
   return false;
 }
 
+export function normalizeDupDescription(desc?: string): string {
+  if (!desc) return '';
+  return desc
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function getBankAliasFamily(desc?: string): 'CONSIG' | 'CONSIGNACION' | null {
+  const norm = normalizeDupDescription(desc);
+  if (!norm) return null;
+
+  if (norm === 'CONSIG LOCAL CAJ ATM MF HALL') {
+    return 'CONSIG';
+  }
+
+  if (norm === 'CONSIGNACION ATM MF HALL AUTO') {
+    return 'CONSIGNACION';
+  }
+
+  return null;
+}
+
 // Fast O(1) Transaction Indexing Engine for Deduplication
 interface TransactionIndex {
   byId: Map<string, Transaction>;
   byLlaveUnica: Map<string, Transaction>;
   byComprobante: Map<string, Transaction>;
   bySemantic: Map<string, Transaction>;
-  byBankAlias: Map<string, Transaction[]>;
+  byBankAlias: Map<string, Transaction>;
 }
 
 function getComprobanteKey(tx: Transaction): string | null {
@@ -909,6 +829,29 @@ function getComprobanteKey(tx: Transaction): string | null {
   return `comp_${nCuenta}_${nFecha}_${nValor}_${nComp}`;
 }
 
+function getBankAliasKey(tx: Transaction): string | null {
+  const family = getBankAliasFamily(tx.descripcion);
+  if (!family) return null;
+  const nCuenta = normalizarCuenta(tx.cuenta);
+  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
+  const nValor = Number(tx.valor || 0).toFixed(2);
+  const nOficina = (tx.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!nOficina) return null;
+  return `alias_${family}_${nCuenta}_${nFecha}_${nValor}_${nOficina}`;
+}
+
+function getOppositeBankAliasKey(tx: Transaction): string | null {
+  const family = getBankAliasFamily(tx.descripcion);
+  if (!family) return null;
+  const oppositeFamily = family === 'CONSIG' ? 'CONSIGNACION' : 'CONSIG';
+  const nCuenta = normalizarCuenta(tx.cuenta);
+  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
+  const nValor = Number(tx.valor || 0).toFixed(2);
+  const nOficina = (tx.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!nOficina) return null;
+  return `alias_${oppositeFamily}_${nCuenta}_${nFecha}_${nValor}_${nOficina}`;
+}
+
 function getSemanticKey(tx: Transaction): string | null {
   const nCuenta = normalizarCuenta(tx.cuenta);
   const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
@@ -918,35 +861,6 @@ function getSemanticKey(tx: Transaction): string | null {
   const nValor = Number(tx.valor || 0).toFixed(2);
   const nDesc = (tx.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 25);
   return `sem_${nCuenta}_${nFecha}_${nHora}_${nValor}_${nDesc}`;
-}
-function normalizeDupDescription(desc?: string): string {
-  return String(desc || '')
-    .toUpperCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Z0-9]/g, '')
-    .trim();
-}
-
-function getBankAliasFamily(tx: Transaction): string | null {
-  const desc = normalizeDupDescription(tx.descripcion);
-
-  // Bancolombia puede representar el mismo depósito ATM/Hall
-  // con dos descripciones diferentes.
-  const isAtmHall =
-    desc.includes('CONSIGLOCALCAJATMMFHALL') ||
-    desc.includes('CONSIGNACIONATMMFHALLAUTO');
-
-  if (!isAtmHall) return null;
-
-  const cuenta = normalizarCuenta(tx.cuenta);
-  const fecha = String(tx.fecha || '').replace(/[-/]/g, '');
-  const valor = Number(tx.valor || 0).toFixed(2);
-  const oficina = String(tx.oficina || '')
-    .replace(/[^0-9A-Z]/gi, '')
-    .toUpperCase();
-
-  return `atm_hall_${cuenta}_${fecha}_${valor}_${oficina}`;
 }
 
 function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
@@ -959,30 +873,14 @@ function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
   };
 
   for (const tx of txs) {
-    if (tx.id) {
-      index.byId.set(tx.id, tx);
-    }
-
-    if (tx.llaveUnica) {
-      index.byLlaveUnica.set(tx.llaveUnica, tx);
-    }
-
+    if (tx.id) index.byId.set(tx.id, tx);
+    if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
     const compKey = getComprobanteKey(tx);
-    if (compKey) {
-      index.byComprobante.set(compKey, tx);
-    }
-
+    if (compKey) index.byComprobante.set(compKey, tx);
+    const aliasKey = getBankAliasKey(tx);
+    if (aliasKey) index.byBankAlias.set(aliasKey, tx);
     const semKey = getSemanticKey(tx);
-    if (semKey) {
-      index.bySemantic.set(semKey, tx);
-    }
-
-    const aliasKey = getBankAliasFamily(tx);
-    if (aliasKey) {
-      const existing = index.byBankAlias.get(aliasKey) || [];
-      existing.push(tx);
-      index.byBankAlias.set(aliasKey, existing);
-    }
+    if (semKey) index.bySemantic.set(semKey, tx);
   }
 
   return index;
@@ -1005,33 +903,19 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
     return index.byComprobante.get(compKey)!;
   }
 
-  // 4. Semantic match (with specific time)
-  const semKey = getSemanticKey(tx);
-if (semKey && index.bySemantic.has(semKey)) {
-  return index.bySemantic.get(semKey)!;
-}
-
-// 5. Bancolombia duplicate aliases.
-// Only collapse the transaction when the bank produced
-// two DIFFERENT descriptions for the same ATM/Hall movement.
-const aliasKey = getBankAliasFamily(tx);
-
-if (aliasKey) {
-  const candidates = index.byBankAlias.get(aliasKey) || [];
-  const currentDesc = normalizeDupDescription(tx.descripcion);
-
-  const aliasDuplicate = candidates.find(candidate => {
-    const candidateDesc = normalizeDupDescription(candidate.descripcion);
-
-    return candidateDesc !== currentDesc;
-  });
-
-  if (aliasDuplicate) {
-    return aliasDuplicate;
+  // 4. Bank Alias match (ONLY between the two distinct description variants: CONSIG LOCAL CAJ ATM MF HALL vs CONSIGNACION ATM MF HALL AUTO)
+  const oppositeAliasKey = getOppositeBankAliasKey(tx);
+  if (oppositeAliasKey && index.byBankAlias.has(oppositeAliasKey)) {
+    return index.byBankAlias.get(oppositeAliasKey)!;
   }
-}
 
-return null;
+  // 5. Semantic match (with specific time)
+  const semKey = getSemanticKey(tx);
+  if (semKey && index.bySemantic.has(semKey)) {
+    return index.bySemantic.get(semKey)!;
+  }
+
+  return null;
 }
 
 export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number; duplicateIdsToRemove: string[] } {
@@ -1079,33 +963,20 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
       if (merged.llaveUnica) index.byLlaveUnica.set(merged.llaveUnica, merged);
       const cKey = getComprobanteKey(merged);
       if (cKey) index.byComprobante.set(cKey, merged);
+      const aKey = getBankAliasKey(merged);
+      if (aKey) index.byBankAlias.set(aKey, merged);
       const sKey = getSemanticKey(merged);
       if (sKey) index.bySemantic.set(sKey, merged);
-      const aliasKey = getBankAliasFamily(merged);
-if (aliasKey) {
-  const candidates = index.byBankAlias.get(aliasKey) || [];
-
-  if (!candidates.some(c => c.id === merged.id)) {
-    candidates.push(merged);
-  }
-
-  index.byBankAlias.set(aliasKey, candidates);
-}
     } else {
       cleaned.push(tx);
       if (tx.id) index.byId.set(tx.id, tx);
       if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
       const compKey = getComprobanteKey(tx);
       if (compKey) index.byComprobante.set(compKey, tx);
+      const aliasKey = getBankAliasKey(tx);
+      if (aliasKey) index.byBankAlias.set(aliasKey, tx);
       const semKey = getSemanticKey(tx);
       if (semKey) index.bySemantic.set(semKey, tx);
-      const aliasKey = getBankAliasFamily(tx);
-
-if (aliasKey) {
-  const candidates = index.byBankAlias.get(aliasKey) || [];
-  candidates.push(tx);
-  index.byBankAlias.set(aliasKey, candidates);
-}
     }
   }
 
