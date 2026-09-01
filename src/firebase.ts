@@ -76,9 +76,29 @@ const INITIAL_TRANSACTIONS: Transaction[] = [];
 // Helper to parse date strings safely across JS engines
 function parseTimestampMs(dateStr?: string | null): number {
   if (!dateStr) return 0;
-  const isoStr = dateStr.includes(' ') ? dateStr.replace(' ', 'T') : dateStr;
+  const clean = String(dateStr).trim();
+  if (!clean) return 0;
+  if (/^\d+$/.test(clean)) return parseInt(clean, 10);
+  const isoStr = clean.includes(' ') ? clean.replace(' ', 'T') : clean;
   const val = new Date(isoStr).getTime();
-  return isNaN(val) ? 0 : val;
+  if (!isNaN(val)) return val;
+  const parts = clean.split(/[-/ :T]/);
+  if (parts.length >= 3) {
+    let y = parseInt(parts[0], 10);
+    let m = parseInt(parts[1], 10) - 1;
+    let d = parseInt(parts[2], 10);
+    if (parts[0].length === 2 && parts[2].length === 4) {
+      d = parseInt(parts[0], 10);
+      m = parseInt(parts[1], 10) - 1;
+      y = parseInt(parts[2], 10);
+    }
+    const h = parseInt(parts[3] || '0', 10);
+    const min = parseInt(parts[4] || '0', 10);
+    const s = parseInt(parts[5] || '0', 10);
+    const t = new Date(y, m, d, h, min, s).getTime();
+    if (!isNaN(t)) return t;
+  }
+  return 0;
 }
 
 // Safe wrapper for localStorage.setItem to gracefully catch QuotaExceededError
@@ -892,8 +912,8 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
     if (existing) {
       removedCount++;
       // Determine which version has the newest status
-      const existingRevTime = existing.revertidoFecha ? parseTimestampMs(existing.revertidoFecha) : 0;
-      const txRevTime = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : 0;
+      const existingRevTime = existing.revertidoFecha ? parseTimestampMs(existing.revertidoFecha) : (existing.revertidoPorUsuario ? 1 : 0);
+      const txRevTime = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : (tx.revertidoPorUsuario ? 1 : 0);
       const existingIdentTime = (existing.identificada && existing.fechaIdentificacion) ? parseTimestampMs(existing.fechaIdentificacion) : 0;
       const txIdentTime = (tx.identificada && tx.fechaIdentificacion) ? parseTimestampMs(tx.fechaIdentificacion) : 0;
 
@@ -902,15 +922,19 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
 
       let isNowIdentified = false;
       let chosenDocForIdent = existing;
-      if (latestIdentTime > latestRevTime) {
+      if (latestRevTime > 0 && latestRevTime >= latestIdentTime) {
+        // Explicitly reverted / un-identified -> PREVAILS as Pending
+        isNowIdentified = false;
+      } else if (latestIdentTime > latestRevTime) {
         isNowIdentified = true;
         chosenDocForIdent = (txIdentTime >= existingIdentTime && tx.identificada) ? tx : existing;
-      } else if (latestRevTime > 0 && latestRevTime >= latestIdentTime) {
-        // Reversion is newer or equal: explicitly un-identified / pending
-        isNowIdentified = false;
       } else {
-        isNowIdentified = existing.identificada || tx.identificada;
-        chosenDocForIdent = tx.identificada ? tx : existing;
+        if (existing.revertidoPorUsuario || tx.revertidoPorUsuario) {
+          isNowIdentified = false;
+        } else {
+          isNowIdentified = existing.identificada || tx.identificada;
+          chosenDocForIdent = tx.identificada ? tx : existing;
+        }
       }
 
       const bestComprobante = (isRealComprobante(tx.comprobante) ? tx.comprobante : null) ||
@@ -1032,7 +1056,31 @@ export async function uploadBankTransactions(
 
     if (existingTx) {
       duplicates++;
-      const isNowIdentified = tx.identificada || existingTx.identificada;
+      const existingRevTime = existingTx.revertidoFecha ? parseTimestampMs(existingTx.revertidoFecha) : (existingTx.revertidoPorUsuario ? 1 : 0);
+      const txRevTime = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : (tx.revertidoPorUsuario ? 1 : 0);
+      const existingIdentTime = (existingTx.identificada && existingTx.fechaIdentificacion) ? parseTimestampMs(existingTx.fechaIdentificacion) : 0;
+      const txIdentTime = (tx.identificada && tx.fechaIdentificacion) ? parseTimestampMs(tx.fechaIdentificacion) : 0;
+
+      const latestRevTime = Math.max(existingRevTime, txRevTime);
+      const latestIdentTime = Math.max(existingIdentTime, txIdentTime);
+
+      let isNowIdentified = false;
+      let chosenDocForIdent = existingTx;
+      if (latestRevTime > 0 && latestRevTime >= latestIdentTime) {
+        // Explicitly reverted -> stays pending
+        isNowIdentified = false;
+      } else if (latestIdentTime > latestRevTime) {
+        isNowIdentified = true;
+        chosenDocForIdent = (txIdentTime >= existingIdentTime && tx.identificada) ? tx : existingTx;
+      } else {
+        if (existingTx.revertidoPorUsuario || tx.revertidoPorUsuario) {
+          isNowIdentified = false;
+        } else {
+          isNowIdentified = tx.identificada || existingTx.identificada;
+          chosenDocForIdent = tx.identificada ? tx : existingTx;
+        }
+      }
+
       const bestComprobante = (isRealComprobante(tx.comprobante) ? tx.comprobante : null) ||
                               (isRealComprobante(existingTx.comprobante) ? existingTx.comprobante : null) ||
                               tx.comprobante || existingTx.comprobante;
@@ -1044,12 +1092,15 @@ export async function uploadBankTransactions(
         esHistorico: false, // Restore / un-archive transaction on re-import
         comprobante: bestComprobante,
         oficina: bestOficina,
-        nroReciboCaja: tx.nroReciboCaja || existingTx.nroReciboCaja,
-        fechaIdentificacion: tx.fechaIdentificacion || existingTx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
-        usuarioIdentificacion: tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName,
-        asesor: tx.asesor || existingTx.asesor || null,
-        tipoDocumento: tx.tipoDocumento || existingTx.tipoDocumento || null,
-        justificacionIgnorado: tx.justificacionIgnorado || existingTx.justificacionIgnorado || null
+        nroReciboCaja: isNowIdentified ? (chosenDocForIdent.nroReciboCaja || existingTx.nroReciboCaja || null) : null,
+        fechaIdentificacion: isNowIdentified ? (chosenDocForIdent.fechaIdentificacion || existingTx.fechaIdentificacion || getColombiaDateTime().dateTimeStr) : null,
+        usuarioIdentificacion: isNowIdentified ? (chosenDocForIdent.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName) : null,
+        asesor: isNowIdentified ? (chosenDocForIdent.asesor || existingTx.asesor || null) : null,
+        tipoDocumento: isNowIdentified ? (chosenDocForIdent.tipoDocumento || existingTx.tipoDocumento || null) : null,
+        justificacionIgnorado: isNowIdentified ? (chosenDocForIdent.justificacionIgnorado || existingTx.justificacionIgnorado || null) : null,
+        revertidoPorUsuario: existingTx.revertidoPorUsuario || tx.revertidoPorUsuario || null,
+        revertidoPorRol: existingTx.revertidoPorRol || tx.revertidoPorRol || null,
+        revertidoFecha: existingTx.revertidoFecha || tx.revertidoFecha || null
       };
       currentMap.set(existingTx.id, updatedTx);
       index.byId.set(updatedTx.id, updatedTx);

@@ -183,6 +183,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
       sedeFilter === 'Todas' || 
       tx.sede === sedeFilter ||
       tx.sede === 'Desconocida' ||
+      !tx.sede ||
       (cuentaFilter !== 'Todas' && matchesCuenta);
 
     return matchesSearch && matchesComprobante && matchesSede && matchesMin && matchesMax && matchesFecha && matchesCuenta;

@@ -256,26 +256,20 @@ export function detectarSede(cuentaStr: string): Sede {
  * Checks if a transaction is irrelevant.
  * As requested:
  * - Omits movements with value less than $1,000 COP (e.g. $236 bank canal fees, micro-charges, zero/negative balances).
- * - Omits corrupted rows from cash closure sheets (where oficina contains 'cajera' or description is a short row number).
- * - Preserves all valid bank transactions and payments over $1,000 COP (including provider payments, disbursements, transfers, etc.).
+ * - Preserves all valid bank transactions and payments over $1,000 COP (including provider payments, disbursements, transfers, consignments, ATM, etc.).
  */
-export function esMovimientoIrrelevante(valor: number, descripcion: string, oficina?: string): boolean {
+export function esMovimientoIrrelevante(valor: number, descripcion: string, _oficina?: string): boolean {
   const absVal = Math.abs(Number(valor || 0));
   // Discard anything less than $1,000 COP or invalid values
   if (isNaN(absVal) || absVal < 1000) {
-    return true;
-  }
-  
-  // If oficina contains 'cajera', it's a corrupted/misparsed closure row, not a valid bank transaction
-  if (oficina && String(oficina).toLowerCase().includes('cajera')) {
     return true;
   }
 
   const rawDesc = String(descripcion || '').trim();
   if (!rawDesc) return true;
 
-  // If description is just a short number (e.g. "1", "2", "3", "5" from cierres columns)
-  if (/^\d{1,3}$/.test(rawDesc)) {
+  // If description is just a short 1-2 digit number from corrupted column shifts
+  if (/^\d{1,2}$/.test(rawDesc)) {
     return true;
   }
 
@@ -296,14 +290,14 @@ export function esMovimientoIrrelevante(valor: number, descripcion: string, ofic
     '4 X 1000',
     '4 X 1.000',
     'GMF',
-    'GRAVAMEN',
+    'GRAVAMEN A LOS MOVIMIENTOS FINANCIEROS',
     'RETEFUENTE',
     'RETEICA',
     'RETEIVA',
     'RETENCION EN LA FUENTE'
   ];
 
-  return pureTaxPatterns.some(pattern => desc.includes(pattern));
+  return pureTaxPatterns.some(pattern => desc === pattern || desc.startsWith(pattern + ' '));
 }
 
 /**
