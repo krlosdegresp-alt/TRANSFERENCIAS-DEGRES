@@ -1,6 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection, 
   doc, 
   setDoc, 
@@ -27,9 +29,14 @@ const firebaseConfig = {
   appId: "1:303118479370:web:d2c45dbd5796070b172ff3"
 };
 
-// Initialize Firebase
+// Initialize Firebase with auto-detect long polling and multi-tab persistent cache
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, "ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212");
+export const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true,
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+}, "ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212");
 export const storage = getStorage(app);
 
 // Predefined accounts for login

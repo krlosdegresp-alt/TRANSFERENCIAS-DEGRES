@@ -10,12 +10,16 @@ export function parseColombianNumber(val: any): number {
   if (val === undefined || val === null) return NaN;
   if (typeof val === 'number') return Math.abs(val);
 
-  // Remove currency symbols, parentheses for negative numbers, common letters, and spaces
-  let str = String(val).trim().replace(/[$\s()]/g, '');
-  if (!str) return NaN;
+  let raw = String(val).trim();
+  if (!raw) return NaN;
 
-  // Strip leading minus sign to ensure positive absolute value
-  str = str.replace(/^-/, '');
+  // Remove currency words and symbols: COP, USD, EUR, COL, $, etc.
+  let str = raw.replace(/(?:COP|USD|EUR|COL|\$)/gi, '').trim();
+  // Remove negative signs, parentheses, quotes, and bullets
+  str = str.replace(/[()'"•\-+]/g, '').trim();
+  // Remove any remaining alphabetical characters or unexpected symbols
+  str = str.replace(/[^\d.,]/g, '').trim();
+  if (!str) return NaN;
 
   const hasComma = str.includes(',');
   const hasDot = str.includes('.');
@@ -24,7 +28,7 @@ export function parseColombianNumber(val: any): number {
     const commaIndex = str.lastIndexOf(',');
     const dotIndex = str.lastIndexOf('.');
     if (commaIndex > dotIndex) {
-      // Comma is the decimal separator (e.g. "1.500.250,50")
+      // Comma is the decimal separator (e.g. "1.500.250,50" or "4.661.500,00")
       str = str.replace(/\./g, '').replace(/,/g, '.');
     } else {
       // Dot is the decimal separator (e.g. "1,500,250.50")
@@ -49,8 +53,6 @@ export function parseColombianNumber(val: any): number {
       const afterDot = parts[1];
       if (afterDot.length === 3) {
         str = str.replace(/\./g, '');
-      } else {
-        // Keep the dot as decimal
       }
     }
   }
@@ -59,8 +61,24 @@ export function parseColombianNumber(val: any): number {
   return isNaN(num) ? NaN : num;
 }
 
+const MONTH_NAME_MAP: Record<string, string> = {
+  'ene': '01', 'enero': '01', 'jan': '01', 'january': '01',
+  'feb': '02', 'febrero': '02', 'february': '02',
+  'mar': '03', 'marzo': '03', 'march': '03',
+  'abr': '04', 'abril': '04', 'apr': '04', 'april': '04',
+  'may': '05', 'mayo': '05',
+  'jun': '06', 'junio': '06', 'june': '06',
+  'jul': '07', 'julio': '07', 'july': '07',
+  'ago': '08', 'agosto': '08', 'aug': '08', 'august': '08',
+  'sep': '09', 'sept': '09', 'septiembre': '09', 'set': '09', 'september': '09',
+  'oct': '10', 'octubre': '10', 'october': '10',
+  'nov': '11', 'noviembre': '11', 'november': '11',
+  'dic': '12', 'diciembre': '12', 'dec': '12', 'december': '12'
+};
+
 /**
  * Normalizes dates parsed from Excel. Handles:
+ * - Text dates like "01 sept 2026", "01 sep 2026", "1 de septiembre de 2026"
  * - YYYYMMDD format without separators (e.g., 20260617)
  * - Excel serial date numbers (e.g., 45180)
  * - Raw string formats ("19/06/2026 14:30:00", "2026-06-19", etc.)
@@ -83,6 +101,32 @@ function parseExcelDate(val: any): string {
   if (!str) {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  // Check text month formats (e.g. "01 sept 2026", "01-sep-2026", "1 de septiembre de 2026")
+  const matchTextDate = str.match(/(\d{1,2})[\s\/\-_.]+(?:de\s+)?([a-zA-ZáéíóúÁÉÍÓÚ]+)[\s\/\-_.]+(?:de\s+)?(\d{2,4})/i);
+  if (matchTextDate) {
+    const day = matchTextDate[1].padStart(2, '0');
+    const rawMonth = matchTextDate[2].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    let year = matchTextDate[3];
+    if (year.length === 2) year = '20' + year;
+    const month = MONTH_NAME_MAP[rawMonth] || MONTH_NAME_MAP[rawMonth.slice(0, 3)] || MONTH_NAME_MAP[rawMonth.slice(0, 4)];
+    if (month) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  // Match month-first text (e.g. "Sept 01 2026")
+  const matchMonthFirst = str.match(/([a-zA-ZáéíóúÁÉÍÓÚ]+)[\s\/\-_.]+(\d{1,2})[\s\/\-_.]+(\d{2,4})/i);
+  if (matchMonthFirst) {
+    const rawMonth = matchMonthFirst[1].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const day = matchMonthFirst[2].padStart(2, '0');
+    let year = matchMonthFirst[3];
+    if (year.length === 2) year = '20' + year;
+    const month = MONTH_NAME_MAP[rawMonth] || MONTH_NAME_MAP[rawMonth.slice(0, 3)] || MONTH_NAME_MAP[rawMonth.slice(0, 4)];
+    if (month) {
+      return `${year}-${month}-${day}`;
+    }
   }
 
   // Try to parse number YYYYMMDD (e.g. 20260617)
@@ -132,11 +176,6 @@ function parseExcelDate(val: any): string {
       year = '20' + year; // Convert 26 to 2026
     }
 
-    // Smart Colombian/Latin Date Parsing (DD/MM/YYYY):
-    // In Colombia, DD/MM/YYYY is standard.
-    // If p1 > 12, p1 MUST be the day, p2 MUST be the month (e.g. 29/07/2026 -> 2026-07-29).
-    // If p2 > 12, p2 MUST be the day, p1 MUST be the month (e.g. 05/29/2026 -> 2026-05-29).
-    // If both <= 12 (e.g. 08/05/2026), default to DD/MM/YYYY (Day=08, Month=05 -> 2026-05-08).
     let day: number, month: number;
     if (p1 > 12 && p2 <= 12) {
       day = p1;
@@ -637,9 +676,6 @@ export function parseExcelBankFile(
 
       if (isNaN(valor) || valor <= 0) continue;
 
-      // Parse Description
-      const desc = String(row[descColIdx] || 'TRANSFERENCIA BANCARIA').trim();
-
       // Parse Date & Time
       const fecha = parseExcelDate(row[fechaColIdx]);
       let hora = '';
@@ -689,9 +725,30 @@ export function parseExcelBankFile(
         }
       }
 
-      // Parse Oficina & Comprobante
-      const oficina = String(row[oficinaColIdx] || '').trim();
-      const comprobante = String(row[comprobanteColIdx] || '').trim();
+      // Parse Description & Oficina
+      let desc = String(row[descColIdx] || 'TRANSFERENCIA BANCARIA').trim();
+      let oficina = String(row[oficinaColIdx] || '').trim();
+      let rawComprobante = String(row[comprobanteColIdx] || '').trim();
+
+      // If description and office are flipped or split across columns
+      const descLower = desc.toLowerCase();
+      const ofiLower = oficina.toLowerCase();
+      if (
+        (ofiLower.includes('pago') || ofiLower.includes('abono') || ofiLower.includes('transferencia') || ofiLower.includes('consignacion') || ofiLower.includes('qr') || ofiLower.includes('compra')) &&
+        !descLower.includes('pago') && !descLower.includes('abono') && !descLower.includes('transferencia') && !descLower.includes('consignacion')
+      ) {
+        // Swap so description has the transaction concept
+        const temp = desc;
+        desc = oficina;
+        oficina = temp;
+      }
+
+      // Sanitize dummy comprobantes like "• -", "-", "--", "- -", "N/A"
+      let comprobante: string | undefined = undefined;
+      const cleanComp = rawComprobante.replace(/[•\s\-_]/g, '').trim();
+      if (cleanComp && cleanComp.toLowerCase() !== 'na' && cleanComp.toLowerCase() !== 'null' && cleanComp.toLowerCase() !== 'ninguno') {
+        comprobante = rawComprobante;
+      }
 
       // Discard tax, fee, commission, or irrelevant movements
       if (esMovimientoIrrelevante(valor, desc, oficina)) {
