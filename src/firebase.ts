@@ -1,6 +1,5 @@
 import { initializeApp } from 'firebase/app';
 import { 
-  initializeFirestore,
   getFirestore, 
   collection, 
   doc, 
@@ -16,10 +15,9 @@ import {
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Transaction, User, Role, Sede, AuditLog, CierreCaja, UploadBatch, ChatMessage, VideoCall, ReportConfig, SystemConfig } from './types';
 import { getColombiaDateTime } from './utils/formato';
-import { isRealComprobante, normalizarCuenta } from './utils/llave-unica';
-import { esMovimientoIrrelevante } from './utils/parser-excel';
+import { isRealComprobante } from './utils/llave-unica';
 
-// Firebase configuration (Original project: gen-lang-client-0899368462)
+// Firebase configuration from firebase-applet-config.json
 const firebaseConfig = {
   apiKey: "AIzaSyBlKnYrZy8nQj6KgP7qCW9k1F-QeCK2Oyo",
   authDomain: "gen-lang-client-0899368462.firebaseapp.com",
@@ -29,30 +27,21 @@ const firebaseConfig = {
   appId: "1:303118479370:web:d2c45dbd5796070b172ff3"
 };
 
-// Initialize single Firebase application
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, 'ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212');
+export const db = getFirestore(app, "ai-studio-transferencias-860ea925-2f2f-4216-a4f9-a6801a3ed212");
 export const storage = getStorage(app);
 
 // Predefined accounts for login
 export const PREDEFINED_USERS: User[] = [
-  { id: 'u0',  email: 'auxcontable@degrescolombia.com',      nombre: 'Tatiana (Tesorera)',        role: 'Tesorera', password: 'Tatiana123' },
-  { id: 'u1',  email: 'gestioncalidad@degrescolombia.com',   nombre: 'Shirley J. (Admin)',        role: 'Admin',    password: 'Admin123' },
-  { id: 'u2',  email: 'cguayabal@degrescolombia.com',        nombre: 'Martha (Cajera)',            role: 'Cajera',   sede: 'Guayabal', password: 'Martha123' },
-  { id: 'u3',  email: 'analistati@degrescolombia.com',       nombre: 'Carlos Ti (Admin)',          role: 'Admin',    password: 'Carlos2026*' },
-  { id: 'u4',  email: 'ventasdegres@degrescolombia.com',     nombre: 'Edwin Cardona (Asesor)',     role: 'Asesor',   password: 'Edwin123' },
-  { id: 'u5',  email: 'npulgarin@degrescolombia.com',        nombre: 'Nora Pulgarín (Asesora)',    role: 'Asesor',   password: 'Nora123' },
-  { id: 'u6',  email: 'harias@degrescolombia.com',           nombre: 'Hernan (Asesor)',            role: 'Asesor',   password: 'Hernan123' },
-  { id: 'u7',  email: 'jtaborda@degrescolombia.com',         nombre: 'Jeimis Taborda (Asesora)',   role: 'Asesor',   password: 'Jeimis123' },
-  { id: 'u8',  email: 'eholguin@degrescolombia.com',         nombre: 'Edwin Holguin (Asesor)',     role: 'Asesor',   password: 'Edwin123' },
-  { id: 'u9',  email: 'dmazo@degrescolombia.com',            nombre: 'Diego Mazo (Asesor)',        role: 'Asesor',   password: 'Diego123' },
-  { id: 'u10', email: 'ventasg@degrescolombia.com',          nombre: 'Yuriani Manjarrez (Asesora)',role: 'Asesor',   password: 'Yuriani123' },
-  { id: 'u11', email: 'mzapata@degrescolombia.com',          nombre: 'Martha Zapata (Cajera)',     role: 'Cajera',   sede: 'Sabaneta', password: 'Martha123' },
-  { id: 'u12', email: 'dgiraldo@degrescolombia.com',         nombre: 'Dora Giraldo (Cajera)',      role: 'Cajera',   sede: 'Naranjal', password: 'Dora123' },
-  { id: 'u13', email: 'earango@degrescolombia.com',          nombre: 'Elina Arango',                role: 'Tesorera', password: 'Elina123' },
-  { id: 'u14', email: 'gestionhumana@degrescolombia.com',    nombre: 'Margarita (Cajera)',         role: 'Cajera',   sede: 'Guayabal', password: 'Margarita123' },
-  { id: 'u15', email: 'mzapata@degrescolombia.com',          nombre: 'Martha Zapata (Asesora)',    role: 'Asesor',   password: 'Martha123' },
-  { id: 'u16', email: 'jaguirre@degrescolombia.com',         nombre: 'Juliana Aguirre (Asesora)',  role: 'Asesor',   password: 'Juliana123' }
+  { id: 'u0', email: 'gestioncalidad@degrescolombia.com', nombre: 'Gestión Calidad (Admin)', role: 'Admin', password: 'Admin123' },
+  { id: 'u1', email: 'admin@degrescolombia.com', nombre: 'Admin General', role: 'Admin', password: 'Admin123' },
+  { id: 'u2', email: 'tesorera@degrescolombia.com', nombre: 'Marta Delgado (Tesorería)', role: 'Tesorera', password: 'Tesorera123' },
+  { id: 'u3', email: 'cajera.guayabal@degrescolombia.com', nombre: 'Lucía Pérez (Caja Guayabal)', role: 'Cajera', sede: 'Guayabal', password: 'Sede123' },
+  { id: 'u4', email: 'cajera.sabaneta@degrescolombia.com', nombre: 'Sofía Montoya (Caja Sabaneta)', role: 'Cajera', sede: 'Sabaneta', password: 'Sede123' },
+  { id: 'u5', email: 'cajera.naranjal@degrescolombia.com', nombre: 'Claudia Giraldo (Caja Naranjal)', role: 'Cajera', sede: 'Naranjal', password: 'Sede123' },
+  { id: 'u6', email: 'asesor@degrescolombia.com', nombre: 'Mateo Osorio (Socio Comercial)', role: 'Asesor', password: 'Asesor123' },
+  { id: 'u7', email: 'analistati@degrescolombia.com', nombre: 'Carlos Ti', role: 'Admin', password: 'Admin123' }
 ];
 
 export const PREDEFINED_ADVISORS: string[] = [];
@@ -76,29 +65,9 @@ const INITIAL_TRANSACTIONS: Transaction[] = [];
 // Helper to parse date strings safely across JS engines
 function parseTimestampMs(dateStr?: string | null): number {
   if (!dateStr) return 0;
-  const clean = String(dateStr).trim();
-  if (!clean) return 0;
-  if (/^\d+$/.test(clean)) return parseInt(clean, 10);
-  const isoStr = clean.includes(' ') ? clean.replace(' ', 'T') : clean;
+  const isoStr = dateStr.includes(' ') ? dateStr.replace(' ', 'T') : dateStr;
   const val = new Date(isoStr).getTime();
-  if (!isNaN(val)) return val;
-  const parts = clean.split(/[-/ :T]/);
-  if (parts.length >= 3) {
-    let y = parseInt(parts[0], 10);
-    let m = parseInt(parts[1], 10) - 1;
-    let d = parseInt(parts[2], 10);
-    if (parts[0].length === 2 && parts[2].length === 4) {
-      d = parseInt(parts[0], 10);
-      m = parseInt(parts[1], 10) - 1;
-      y = parseInt(parts[2], 10);
-    }
-    const h = parseInt(parts[3] || '0', 10);
-    const min = parseInt(parts[4] || '0', 10);
-    const s = parseInt(parts[5] || '0', 10);
-    const t = new Date(y, m, d, h, min, s).getTime();
-    if (!isNaN(t)) return t;
-  }
-  return 0;
+  return isNaN(val) ? 0 : val;
 }
 
 // Safe wrapper for localStorage.setItem to gracefully catch QuotaExceededError
@@ -208,89 +177,29 @@ export function initializeRealtimeListeners() {
       usersList.push(docSnap.data() as User);
     });
 
-    if (usersList.length > 0) {
-      // Preserve users by document/user ID rather than email.
-      // This is required because two valid records intentionally share the same email.
-      const userMap = new Map<string, User>();
-      PREDEFINED_USERS.forEach(u => userMap.set(u.id, u));
-      usersList.forEach(u => {
-        if (u && u.id) {
-          userMap.set(u.id, {
-            ...userMap.get(u.id),
-            ...u
-          });
-        }
-      });
-      safeSetLocalStorage(STORAGE_USERS_KEY, JSON.stringify(Array.from(userMap.values())));
-      notifyListeners();
-    }
+    safeSetLocalStorage(STORAGE_USERS_KEY, JSON.stringify(usersList));
+    notifyListeners();
   }, handleListenerError('users'));
 
   // 2. Transactions listener
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
-    // Current local transactions
-    const localTxs = getTransactions();
-    const txMap = new Map<string, Transaction>();
-    localTxs.forEach(t => {
-      if (t && t.id) txMap.set(t.id, t);
-    });
-
+    let txList: Transaction[] = [];
     snapshot.forEach(docSnap => {
-      const data = docSnap.data() as Transaction;
-      const parsedVal = Math.abs(Number(data.valor || 0));
-      const tx: Transaction = {
-        ...data,
-        valor: isNaN(parsedVal) ? 0 : parsedVal,
-        id: data.id || docSnap.id,
-        llaveUnica: data.llaveUnica || data.id || docSnap.id
-      };
-      if (!esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina)) {
-        const localExisting = txMap.get(tx.id);
-        if (localExisting) {
-          // If locally it was reverted or explicitly modified
-          const localRev = localExisting.revertidoFecha ? parseTimestampMs(localExisting.revertidoFecha) : (localExisting.revertidoPorUsuario ? 1 : 0);
-          const remoteRev = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : (tx.revertidoPorUsuario ? 1 : 0);
-          const localIdent = (localExisting.identificada && localExisting.fechaIdentificacion) ? parseTimestampMs(localExisting.fechaIdentificacion) : 0;
-          const remoteIdent = (tx.identificada && tx.fechaIdentificacion) ? parseTimestampMs(tx.fechaIdentificacion) : 0;
-
-          if (localRev > 0 && localRev >= remoteIdent && localRev >= remoteRev) {
-            // Local reversion takes precedence as Pending
-            txMap.set(tx.id, {
-              ...tx,
-              ...localExisting,
-              identificada: false,
-              nroReciboCaja: null,
-              fechaIdentificacion: null,
-              usuarioIdentificacion: null,
-              asesor: null,
-              tipoDocumento: null,
-              justificacionIgnorado: null
-            });
-          } else {
-            txMap.set(tx.id, {
-              ...localExisting,
-              ...tx
-            });
-          }
-        } else {
-          txMap.set(tx.id, tx);
-        }
-      }
+      txList.push(docSnap.data() as Transaction);
     });
 
-    const combined = Array.from(txMap.values());
-    const { cleaned } = deduplicateTransactionList(combined);
+    // Auto-deduplicate stored snapshot transactions
+    const { cleaned } = deduplicateTransactionList(txList);
 
-    if (cleaned.length > 0 || snapshot.empty) {
-      cleaned.sort((a, b) => {
-        const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
-        const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
-        return dateTimeB.localeCompare(dateTimeA);
-      });
+    // Sort: latest dates first
+    cleaned.sort((a, b) => {
+      const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
+      const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
+      return dateTimeB.localeCompare(dateTimeA);
+    });
 
-      safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
-      notifyListeners();
-    }
+    safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
+    notifyListeners();
   }, handleListenerError('transactions'));
 
   // 3. Batches listener
@@ -300,11 +209,10 @@ export function initializeRealtimeListeners() {
       batchList.push(docSnap.data() as UploadBatch);
     });
 
-    if (batchList.length > 0) {
-      batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
-      safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
-      notifyListeners();
-    }
+    batchList.sort((a, b) => b.fechaCarga.localeCompare(a.fechaCarga));
+
+    safeSetLocalStorage(STORAGE_BATCHES_KEY, JSON.stringify(batchList));
+    notifyListeners();
   }, handleListenerError('batches'));
 
   // 4. Cierres listener
@@ -439,7 +347,7 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Initialize real-time listeners directly
+// Start listeners immediately on import
 initializeRealtimeListeners();
 
 export function getSystemConfig(): SystemConfig {
@@ -556,28 +464,13 @@ ensurePredefinedTransactionsInFirestore();
 // USERS OPERATIONS
 // ----------------------------------------------------
 export function getUsers(): User[] {
-  // Key by ID, not email, because duplicate email records are intentional.
-  const userMap = new Map<string, User>();
-  PREDEFINED_USERS.forEach(u => userMap.set(u.id, u));
-
   const data = localStorage.getItem(STORAGE_USERS_KEY);
-  if (data) {
-    try {
-      const list = JSON.parse(data) as User[];
-      if (Array.isArray(list)) {
-        list.forEach(u => {
-          if (u && u.id) {
-            const existing = userMap.get(u.id);
-            userMap.set(u.id, {
-              ...existing,
-              ...u
-            });
-          }
-        });
-      }
-    } catch (e) {}
+  if (data === null) return PREDEFINED_USERS;
+  try {
+    return JSON.parse(data) as User[];
+  } catch (e) {
+    return PREDEFINED_USERS;
   }
-  return Array.from(userMap.values());
 }
 
 export async function saveUsers(users: User[]) {
@@ -686,13 +579,7 @@ export function getTransactions(): Transaction[] {
   const data = localStorage.getItem(STORAGE_TRANS_KEY);
   if (!data) return [];
   try {
-    const list = JSON.parse(data) as Transaction[];
-    if (Array.isArray(list)) {
-      const filtered = list.filter(t => !esMovimientoIrrelevante(t.valor, t.descripcion, t.oficina));
-      const { cleaned } = deduplicateTransactionList(filtered);
-      return cleaned;
-    }
-    return [];
+    return JSON.parse(data) as Transaction[];
   } catch (e) {
     return [];
   }
@@ -745,54 +632,64 @@ export function saveUploadBatches(batches: UploadBatch[]) {
 // DEDUPLICATION ENGINE
 // ----------------------------------------------------
 export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): boolean {
-  if (tx1.id && tx2.id && tx1.id === tx2.id) return true;
-  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica === tx2.llaveUnica) return true;
-
-  // Real Comprobante match
-  if (isRealComprobante(tx1.comprobante) && isRealComprobante(tx2.comprobante)) {
-    const c1 = String(tx1.comprobante).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const c2 = String(tx2.comprobante).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (
-      c1 === c2 &&
-      normalizarCuenta(tx1.cuenta) === normalizarCuenta(tx2.cuenta) &&
-      (tx1.fecha || '').replace(/[-/]/g, '') === (tx2.fecha || '').replace(/[-/]/g, '') &&
-      Math.abs(Number(tx1.valor || 0) - Number(tx2.valor || 0)) < 0.01
-    ) {
-      return true;
-    }
-  }
-
-  // Bank alias match (ONLY between the two DIFFERENT variants: CONSIG LOCAL CAJ ATM MF HALL vs CONSIGNACION ATM MF HALL AUTO)
-  const f1 = getBankAliasFamily(tx1.descripcion);
-  const f2 = getBankAliasFamily(tx2.descripcion);
-  if (
-    f1 &&
-    f2 &&
-    f1 !== f2 && // MUST BE DIFFERENT VARIANTS
-    normalizarCuenta(tx1.cuenta) === normalizarCuenta(tx2.cuenta) &&
-    (tx1.fecha || '').replace(/[-/]/g, '') === (tx2.fecha || '').replace(/[-/]/g, '') &&
-    Math.abs(Number(tx1.valor || 0) - Number(tx2.valor || 0)) < 0.01 &&
-    (tx1.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') ===
-      (tx2.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') &&
-    (tx1.oficina || '').trim().length > 0
-  ) {
+  // 1. Exact ID or LlaveUnica match -> DEFINITELY DUPLICATE
+  if (tx1.id === tx2.id || (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica === tx2.llaveUnica)) {
     return true;
   }
 
-  // Semantic timestamp match
-  let h1 = (tx1.hora || '').replace(/[:\s]/g, '');
-  let h2 = (tx2.hora || '').replace(/[:\s]/g, '');
-  if (h1 === '120000') h1 = '';
-  if (h2 === '120000') h2 = '';
-  if (h1 && h2 && h1.length >= 4 && h1 === h2) {
-    const d1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
-    const d2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
-    if (
-      d1 === d2 &&
-      normalizarCuenta(tx1.cuenta) === normalizarCuenta(tx2.cuenta) &&
-      (tx1.fecha || '').replace(/[-/]/g, '') === (tx2.fecha || '').replace(/[-/]/g, '') &&
-      Math.abs(Number(tx1.valor || 0) - Number(tx2.valor || 0)) < 0.01
-    ) {
+  // If both transactions have distinct non-empty unique keys (e.g. occurrence index suffix _o1 vs _o0, or different hashes/descriptions),
+  // they represent guaranteed separate row entries from the bank statement!
+  if (tx1.llaveUnica && tx2.llaveUnica && tx1.llaveUnica !== tx2.llaveUnica) {
+    return false;
+  }
+
+  // 2. Value matching (within $0.01 COP tolerance)
+  const sameValor = Math.abs((tx1.valor || 0) - (tx2.valor || 0)) < 0.01;
+  if (!sameValor) return false;
+
+  // 3. Account / Sede matching
+  const normCta1 = (tx1.cuenta || '').replace(/\D/g, '').slice(-4);
+  const normCta2 = (tx2.cuenta || '').replace(/\D/g, '').slice(-4);
+  const sameAccount = (normCta1 && normCta2 && normCta1 === normCta2) ||
+                      (tx1.sede !== 'Desconocida' && tx1.sede === tx2.sede) ||
+                      (!normCta1 || !normCta2);
+
+  if (!sameAccount) return false;
+
+  // 4. Real Genuine Comprobante check (only genuine bank voucher numbers, rejecting 000000/999999/dummy codes)
+  const isReal1 = isRealComprobante(tx1.comprobante);
+  const isReal2 = isRealComprobante(tx2.comprobante);
+
+  if (isReal1 && isReal2) {
+    const normComp1 = (tx1.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normComp2 = (tx2.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normComp1 === normComp2) {
+      if (tx1.fecha === tx2.fecha) {
+        return true; // 100% same payment voucher on the same date!
+      }
+    } else {
+      return false; // DIFFERENT vouchers = DIFFERENT payments!
+    }
+  }
+
+  // 5. Time check (if both have recorded distinct times, e.g. "12:15:20" vs "17:05:42")
+  const normHora1 = (tx1.hora || '').trim().replace(/[:]/g, '');
+  const normHora2 = (tx2.hora || '').trim().replace(/[:]/g, '');
+  if (normHora1 && normHora2 && normHora1 !== '120000' && normHora2 !== '120000') {
+    if (normHora1 !== normHora2) {
+      return false; // Different times = DIFFERENT payments!
+    }
+  }
+
+  // 6. Description & Date matching (legacy fallback only when llaveUnica is missing on at least one transaction)
+  if (!tx1.llaveUnica || !tx2.llaveUnica) {
+    const normDesc1 = (tx1.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normDesc2 = (tx2.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const sameDesc = normDesc1.length > 3 && normDesc2.length > 3 && 
+                     (normDesc1 === normDesc2);
+
+    if (sameDesc && tx1.fecha === tx2.fecha) {
       return true;
     }
   }
@@ -800,83 +697,12 @@ export function isDuplicateTransaction(tx1: Transaction, tx2: Transaction): bool
   return false;
 }
 
-export function normalizeDupDescription(desc?: string): string {
-  if (!desc) return '';
-  return desc
-    .toUpperCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function getBankAliasFamily(desc?: string): 'CONSIG' | 'CONSIGNACION' | null {
-  const norm = normalizeDupDescription(desc);
-  if (!norm) return null;
-
-  if (norm === 'CONSIG LOCAL CAJ ATM MF HALL') {
-    return 'CONSIG';
-  }
-
-  if (norm === 'CONSIGNACION ATM MF HALL AUTO') {
-    return 'CONSIGNACION';
-  }
-
-  return null;
-}
-
-// Fast O(1) Transaction Indexing Engine for Deduplication
+// Fast O(1) Transaction Indexing Engine for Hyper-fast Deduplication
 interface TransactionIndex {
   byId: Map<string, Transaction>;
   byLlaveUnica: Map<string, Transaction>;
   byComprobante: Map<string, Transaction>;
-  bySemantic: Map<string, Transaction>;
-  byBankAlias: Map<string, Transaction>;
-}
-
-function getComprobanteKey(tx: Transaction): string | null {
-  if (!isRealComprobante(tx.comprobante)) return null;
-  const nCuenta = normalizarCuenta(tx.cuenta);
-  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
-  const nValor = Number(tx.valor || 0).toFixed(2);
-  const nComp = String(tx.comprobante).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!nComp || nComp.length < 3) return null;
-  return `comp_${nCuenta}_${nFecha}_${nValor}_${nComp}`;
-}
-
-function getBankAliasKey(tx: Transaction): string | null {
-  const family = getBankAliasFamily(tx.descripcion);
-  if (!family) return null;
-  const nCuenta = normalizarCuenta(tx.cuenta);
-  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
-  const nValor = Number(tx.valor || 0).toFixed(2);
-  const nOficina = (tx.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!nOficina) return null;
-  return `alias_${family}_${nCuenta}_${nFecha}_${nValor}_${nOficina}`;
-}
-
-function getOppositeBankAliasKey(tx: Transaction): string | null {
-  const family = getBankAliasFamily(tx.descripcion);
-  if (!family) return null;
-  const oppositeFamily = family === 'CONSIG' ? 'CONSIGNACION' : 'CONSIG';
-  const nCuenta = normalizarCuenta(tx.cuenta);
-  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
-  const nValor = Number(tx.valor || 0).toFixed(2);
-  const nOficina = (tx.oficina || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!nOficina) return null;
-  return `alias_${oppositeFamily}_${nCuenta}_${nFecha}_${nValor}_${nOficina}`;
-}
-
-function getSemanticKey(tx: Transaction): string | null {
-  const nCuenta = normalizarCuenta(tx.cuenta);
-  const nFecha = (tx.fecha || '').replace(/[-/]/g, '').trim();
-  let nHora = (tx.hora || '').replace(/[:\s]/g, '').trim();
-  if (nHora === '120000') nHora = '';
-  if (!nHora || nHora.length < 4) return null;
-  const nValor = Number(tx.valor || 0).toFixed(2);
-  const nDesc = (tx.descripcion || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 25);
-  return `sem_${nCuenta}_${nFecha}_${nHora}_${nValor}_${nDesc}`;
+  byValor: Map<number, Transaction[]>;
 }
 
 function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
@@ -884,19 +710,29 @@ function buildTransactionIndex(txs: Transaction[]): TransactionIndex {
     byId: new Map(),
     byLlaveUnica: new Map(),
     byComprobante: new Map(),
-    bySemantic: new Map(),
-    byBankAlias: new Map()
+    byValor: new Map()
   };
 
   for (const tx of txs) {
     if (tx.id) index.byId.set(tx.id, tx);
     if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
-    const compKey = getComprobanteKey(tx);
-    if (compKey) index.byComprobante.set(compKey, tx);
-    const aliasKey = getBankAliasKey(tx);
-    if (aliasKey) index.byBankAlias.set(aliasKey, tx);
-    const semKey = getSemanticKey(tx);
-    if (semKey) index.bySemantic.set(semKey, tx);
+
+    // Only index genuinely unique bank vouchers (never generic 000000/999999/dummy codes)
+    if (isRealComprobante(tx.comprobante)) {
+      const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
+      const normVal = Math.round(tx.valor || 0);
+      const normFec = (tx.fecha || '').replace(/[-/]/g, '');
+      index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
+    }
+
+    const valKey = Math.round(tx.valor || 0);
+    const existingGroup = index.byValor.get(valKey);
+    if (existingGroup) {
+      existingGroup.push(tx);
+    } else {
+      index.byValor.set(valKey, [tx]);
+    }
   }
 
   return index;
@@ -913,24 +749,34 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
     return index.byLlaveUnica.get(tx.llaveUnica)!;
   }
 
-  // 3. Real Comprobante match
-  const compKey = getComprobanteKey(tx);
-  if (compKey && index.byComprobante.has(compKey)) {
-    return index.byComprobante.get(compKey)!;
+  // 3. Check Genuine Comprobante + Account + Date + Valor (only if real voucher exists)
+  if (isRealComprobante(tx.comprobante)) {
+    const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
+    const normVal = Math.round(tx.valor || 0);
+    const normFec = (tx.fecha || '').replace(/[-/]/g, '');
+    const compKey = `${normCta}_${normFec}_${normVal}_${normComp}`;
+    if (index.byComprobante.has(compKey)) {
+      return index.byComprobante.get(compKey)!;
+    }
   }
 
-  // 4. Bank Alias match (ONLY between the two distinct description variants: CONSIG LOCAL CAJ ATM MF HALL vs CONSIGNACION ATM MF HALL AUTO)
-  const oppositeAliasKey = getOppositeBankAliasKey(tx);
-  if (oppositeAliasKey && index.byBankAlias.has(oppositeAliasKey)) {
-    return index.byBankAlias.get(oppositeAliasKey)!;
+  // 4. Fallback: Check candidate transactions sharing the exact rounded monetary amount
+  const valKey = Math.round(tx.valor || 0);
+  const candidates = index.byValor.get(valKey);
+  if (candidates && candidates.length > 0) {
+    for (const candidate of candidates) {
+      if (isDuplicateTransaction(candidate, tx)) {
+        return candidate;
+      }
+    }
   }
 
   return null;
 }
 
-export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number; duplicateIdsToRemove: string[] } {
+export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number } {
   const cleaned: Transaction[] = [];
-  const duplicateIdsToRemove: string[] = [];
   let removedCount = 0;
   const index = buildTransactionIndex([]);
 
@@ -938,59 +784,20 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
     const existing = findMatchingDuplicateInIndex(tx, index);
     if (existing) {
       removedCount++;
-      // Determine which version has the newest status
-      const existingRevTime = existing.revertidoFecha ? parseTimestampMs(existing.revertidoFecha) : (existing.revertidoPorUsuario ? 1 : 0);
-      const txRevTime = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : (tx.revertidoPorUsuario ? 1 : 0);
-      const existingIdentTime = (existing.identificada && existing.fechaIdentificacion) ? parseTimestampMs(existing.fechaIdentificacion) : 0;
-      const txIdentTime = (tx.identificada && tx.fechaIdentificacion) ? parseTimestampMs(tx.fechaIdentificacion) : 0;
-
-      const latestRevTime = Math.max(existingRevTime, txRevTime);
-      const latestIdentTime = Math.max(existingIdentTime, txIdentTime);
-
-      let isNowIdentified = false;
-      let chosenDocForIdent = existing;
-      if (latestRevTime > 0 && latestRevTime >= latestIdentTime) {
-        // Explicitly reverted / un-identified -> PREVAILS as Pending
-        isNowIdentified = false;
-      } else if (latestIdentTime > latestRevTime) {
-        isNowIdentified = true;
-        chosenDocForIdent = (txIdentTime >= existingIdentTime && tx.identificada) ? tx : existing;
-      } else {
-        if (existing.revertidoPorUsuario || tx.revertidoPorUsuario) {
-          isNowIdentified = false;
-        } else {
-          isNowIdentified = existing.identificada || tx.identificada;
-          chosenDocForIdent = tx.identificada ? tx : existing;
-        }
-      }
-
-      const bestComprobante = (isRealComprobante(tx.comprobante) ? tx.comprobante : null) ||
-                              (isRealComprobante(existing.comprobante) ? existing.comprobante : null) ||
-                              tx.comprobante || existing.comprobante || undefined;
-      const bestOficina = tx.oficina || existing.oficina || undefined;
-      const bestHora = (tx.hora && tx.hora !== '12:00:00') ? tx.hora : (existing.hora || tx.hora || '');
-
+      const isNowIdentified = existing.identificada || tx.identificada;
       const merged: Transaction = {
         ...existing,
-        hora: bestHora,
         identificada: isNowIdentified,
         esHistorico: existing.esHistorico && tx.esHistorico,
-        comprobante: bestComprobante,
-        oficina: bestOficina,
-        nroReciboCaja: isNowIdentified ? (chosenDocForIdent.nroReciboCaja || null) : null,
-        fechaIdentificacion: isNowIdentified ? (chosenDocForIdent.fechaIdentificacion || getColombiaDateTime().dateTimeStr) : null,
-        usuarioIdentificacion: isNowIdentified ? (chosenDocForIdent.usuarioIdentificacion || null) : null,
-        asesor: isNowIdentified ? (chosenDocForIdent.asesor || null) : null,
-        tipoDocumento: isNowIdentified ? (chosenDocForIdent.tipoDocumento || null) : null,
-        justificacionIgnorado: isNowIdentified ? (chosenDocForIdent.justificacionIgnorado || null) : null,
-        revertidoPorUsuario: existing.revertidoPorUsuario || tx.revertidoPorUsuario || null,
-        revertidoPorRol: existing.revertidoPorRol || tx.revertidoPorRol || null,
-        revertidoFecha: existing.revertidoFecha || tx.revertidoFecha || null
+        comprobante: existing.comprobante || tx.comprobante || undefined,
+        oficina: existing.oficina || tx.oficina || undefined,
+        nroReciboCaja: existing.nroReciboCaja || tx.nroReciboCaja || null,
+        fechaIdentificacion: existing.fechaIdentificacion || tx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
+        usuarioIdentificacion: existing.usuarioIdentificacion || tx.usuarioIdentificacion || null,
+        asesor: existing.asesor || tx.asesor || null,
+        tipoDocumento: existing.tipoDocumento || tx.tipoDocumento || null,
+        justificacionIgnorado: existing.justificacionIgnorado || tx.justificacionIgnorado || null
       };
-
-      if (tx.id && tx.id !== existing.id) {
-        duplicateIdsToRemove.push(tx.id);
-      }
 
       const idx = cleaned.findIndex(c => c.id === existing.id);
       if (idx !== -1) {
@@ -999,51 +806,37 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
 
       index.byId.set(merged.id, merged);
       if (merged.llaveUnica) index.byLlaveUnica.set(merged.llaveUnica, merged);
-      const cKey = getComprobanteKey(merged);
-      if (cKey) index.byComprobante.set(cKey, merged);
-      const aKey = getBankAliasKey(merged);
-      if (aKey) index.byBankAlias.set(aKey, merged);
-      const sKey = getSemanticKey(merged);
-      if (sKey) index.bySemantic.set(sKey, merged);
     } else {
       cleaned.push(tx);
       if (tx.id) index.byId.set(tx.id, tx);
       if (tx.llaveUnica) index.byLlaveUnica.set(tx.llaveUnica, tx);
-      const compKey = getComprobanteKey(tx);
-      if (compKey) index.byComprobante.set(compKey, tx);
-      const aliasKey = getBankAliasKey(tx);
-      if (aliasKey) index.byBankAlias.set(aliasKey, tx);
-      const semKey = getSemanticKey(tx);
-      if (semKey) index.bySemantic.set(semKey, tx);
+      if (isRealComprobante(tx.comprobante)) {
+        const normComp = (tx.comprobante || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normCta = (tx.cuenta || '').replace(/\D/g, '').slice(-4);
+        const normVal = Math.round(tx.valor || 0);
+        const normFec = (tx.fecha || '').replace(/[-/]/g, '');
+        index.byComprobante.set(`${normCta}_${normFec}_${normVal}_${normComp}`, tx);
+      }
+      const valKey = Math.round(tx.valor || 0);
+      const group = index.byValor.get(valKey);
+      if (group) group.push(tx);
+      else index.byValor.set(valKey, [tx]);
     }
   }
 
-  return { cleaned, removedCount, duplicateIdsToRemove };
+  return { cleaned, removedCount };
 }
 
 export async function purgeDuplicateTransactionsFromDatabase(adminName: string): Promise<{ totalPurged: number }> {
   const current = getTransactions();
-  const { cleaned, removedCount, duplicateIdsToRemove } = deduplicateTransactionList(current);
+  const { cleaned, removedCount } = deduplicateTransactionList(current);
 
   if (removedCount > 0) {
     saveTransactions(cleaned);
-
-    if (duplicateIdsToRemove && duplicateIdsToRemove.length > 0) {
-      try {
-        const batch = writeBatch(db);
-        duplicateIdsToRemove.forEach(id => {
-          batch.delete(doc(db, 'transactions', id));
-        });
-        await batch.commit();
-      } catch (e) {
-        console.warn('Error purging duplicate documents from Firestore:', e);
-      }
-    }
-
     addAuditLog(
       adminName,
       'Depuración de Duplicados',
-      `Ejecutó depuración automática de duplicados. Se eliminaron/fusionaron ${removedCount} registros duplicados (unificando referencias y oficinas).`
+      `Ejecutó depuración automática de duplicados. Se eliminaron/fusionaron ${removedCount} registros duplicados.`
     );
   }
 
@@ -1060,11 +853,8 @@ export async function uploadBankTransactions(
   localStorage.removeItem(STORAGE_WIPE_TIME_KEY);
   setDoc(doc(db, 'configs', 'wipeState'), { wipeTime: 0 }).catch(() => {});
 
-  // 0. Filter out irrelevant movements (provider payments, payroll, commissions, bank service charges, taxes)
-  const filteredInputTxs = newTxs.filter(tx => !esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina));
-
   // 1. Deduplicate incoming batch first
-  const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(filteredInputTxs);
+  const { cleaned: cleanedNewTxs, removedCount: inBatchDupes } = deduplicateTransactionList(newTxs);
 
   const current = getTransactions();
   const index = buildTransactionIndex(current);
@@ -1083,51 +873,19 @@ export async function uploadBankTransactions(
 
     if (existingTx) {
       duplicates++;
-      const existingRevTime = existingTx.revertidoFecha ? parseTimestampMs(existingTx.revertidoFecha) : (existingTx.revertidoPorUsuario ? 1 : 0);
-      const txRevTime = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : (tx.revertidoPorUsuario ? 1 : 0);
-      const existingIdentTime = (existingTx.identificada && existingTx.fechaIdentificacion) ? parseTimestampMs(existingTx.fechaIdentificacion) : 0;
-      const txIdentTime = (tx.identificada && tx.fechaIdentificacion) ? parseTimestampMs(tx.fechaIdentificacion) : 0;
-
-      const latestRevTime = Math.max(existingRevTime, txRevTime);
-      const latestIdentTime = Math.max(existingIdentTime, txIdentTime);
-
-      let isNowIdentified = false;
-      let chosenDocForIdent = existingTx;
-      if (latestRevTime > 0 && latestRevTime >= latestIdentTime) {
-        // Explicitly reverted -> stays pending
-        isNowIdentified = false;
-      } else if (latestIdentTime > latestRevTime) {
-        isNowIdentified = true;
-        chosenDocForIdent = (txIdentTime >= existingIdentTime && tx.identificada) ? tx : existingTx;
-      } else {
-        if (existingTx.revertidoPorUsuario || tx.revertidoPorUsuario) {
-          isNowIdentified = false;
-        } else {
-          isNowIdentified = tx.identificada || existingTx.identificada;
-          chosenDocForIdent = tx.identificada ? tx : existingTx;
-        }
-      }
-
-      const bestComprobante = (isRealComprobante(tx.comprobante) ? tx.comprobante : null) ||
-                              (isRealComprobante(existingTx.comprobante) ? existingTx.comprobante : null) ||
-                              tx.comprobante || existingTx.comprobante;
-      const bestOficina = tx.oficina || existingTx.oficina;
-
+      const isNowIdentified = tx.identificada || existingTx.identificada;
       const updatedTx: Transaction = {
         ...existingTx,
         identificada: isNowIdentified,
         esHistorico: false, // Restore / un-archive transaction on re-import
-        comprobante: bestComprobante,
-        oficina: bestOficina,
-        nroReciboCaja: isNowIdentified ? (chosenDocForIdent.nroReciboCaja || existingTx.nroReciboCaja || null) : null,
-        fechaIdentificacion: isNowIdentified ? (chosenDocForIdent.fechaIdentificacion || existingTx.fechaIdentificacion || getColombiaDateTime().dateTimeStr) : null,
-        usuarioIdentificacion: isNowIdentified ? (chosenDocForIdent.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName) : null,
-        asesor: isNowIdentified ? (chosenDocForIdent.asesor || existingTx.asesor || null) : null,
-        tipoDocumento: isNowIdentified ? (chosenDocForIdent.tipoDocumento || existingTx.tipoDocumento || null) : null,
-        justificacionIgnorado: isNowIdentified ? (chosenDocForIdent.justificacionIgnorado || existingTx.justificacionIgnorado || null) : null,
-        revertidoPorUsuario: existingTx.revertidoPorUsuario || tx.revertidoPorUsuario || null,
-        revertidoPorRol: existingTx.revertidoPorRol || tx.revertidoPorRol || null,
-        revertidoFecha: existingTx.revertidoFecha || tx.revertidoFecha || null
+        comprobante: tx.comprobante || existingTx.comprobante,
+        oficina: tx.oficina || existingTx.oficina,
+        nroReciboCaja: tx.nroReciboCaja || existingTx.nroReciboCaja,
+        fechaIdentificacion: tx.fechaIdentificacion || existingTx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
+        usuarioIdentificacion: tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName,
+        asesor: tx.asesor || existingTx.asesor || null,
+        tipoDocumento: tx.tipoDocumento || existingTx.tipoDocumento || null,
+        justificacionIgnorado: tx.justificacionIgnorado || existingTx.justificacionIgnorado || null
       };
       currentMap.set(existingTx.id, updatedTx);
       index.byId.set(updatedTx.id, updatedTx);
@@ -1179,21 +937,17 @@ export async function uploadBankTransactions(
   try {
     let downloadUrl = '';
     if (fileBlob) {
-      // Perform storage upload in non-blocking manner without throwing alarming timeout warnings
-      (async () => {
-        try {
-          const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
-          const snapshot = await uploadBytes(storageRef, fileBlob);
-          if (snapshot && snapshot.ref) {
-            const url = await getDownloadURL(snapshot.ref);
-            if (url) {
-              await updateDoc(doc(db, 'batches', batchId), { archivoUrl: url }).catch(() => {});
-            }
-          }
-        } catch {
-          // File storage is an optional binary backup; silent fallback
-        }
-      })();
+      try {
+        const storageRef = ref(storage, `batches/${batchId}/${fileBlob.name}`);
+        const uploadTask = uploadBytes(storageRef, fileBlob);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Storage upload timeout')), 2500)
+        );
+        const snapshot = await Promise.race([uploadTask, timeoutPromise]);
+        downloadUrl = await getDownloadURL(snapshot.ref);
+      } catch (stgErr) {
+        console.warn("Firebase Storage upload skipped or timed out, proceeding with db save:", stgErr);
+      }
     }
 
     // Save modified or new transactions to Firestore in chunks of 500 concurrently
@@ -1318,7 +1072,7 @@ export function identifyTransaction(
   customFechaIdentificacion?: string | null
 ): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
+  const idx = current.findIndex(tx => tx.id === id);
   if (idx === -1) return false;
 
   if (current[idx].identificada) return false;
@@ -1334,7 +1088,6 @@ export function identifyTransaction(
     }
   }
 
-  const targetId = current[idx].id;
   const updatedTx = {
     ...current[idx],
     identificada: true,
@@ -1351,7 +1104,7 @@ export function identifyTransaction(
   safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
     console.error("Error identifying transaction in Firestore:", err);
   });
 
@@ -1372,10 +1125,9 @@ export function updateTransactionFechaIdentificacion(
   adminName: string
 ): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
+  const idx = current.findIndex(tx => tx.id === id);
   if (idx === -1) return false;
 
-  const targetId = current[idx].id;
   const currentTime = current[idx].fechaIdentificacion
     ? current[idx].fechaIdentificacion!.slice(11)
     : getColombiaDateTime().dateTimeStr.slice(11);
@@ -1391,7 +1143,7 @@ export function updateTransactionFechaIdentificacion(
   safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', targetId), updatedTx, { merge: true }).catch(err => {
+  setDoc(doc(db, 'transactions', id), updatedTx, { merge: true }).catch(err => {
     console.error("Error updating fechaIdentificacion in Firestore:", err);
   });
 
@@ -1406,57 +1158,42 @@ export function updateTransactionFechaIdentificacion(
 
 export function revertIdentification(id: string, adminName: string, adminRole: string = 'Admin'): boolean {
   const current = getTransactions();
-  const matchingIndices: number[] = [];
-  current.forEach((tx, i) => {
-    if (tx.id === id || tx.llaveUnica === id) {
-      matchingIndices.push(i);
-    }
-  });
+  const idx = current.findIndex(tx => tx.id === id);
+  if (idx === -1) return false;
 
-  if (matchingIndices.length === 0) return false;
+  const originalDoc = current[idx].tipoDocumento;
+  const originalAsesor = current[idx].asesor;
 
-  const firstTx = current[matchingIndices[0]];
-  const targetId = firstTx.id;
-  const originalDoc = firstTx.tipoDocumento;
-  const originalAsesor = firstTx.asesor;
-  const revertTime = getColombiaDateTime().dateTimeStr;
+  const updatedTx = {
+    ...current[idx],
+    identificada: false,
+    fechaIdentificacion: null,
+    usuarioIdentificacion: null,
+    asesor: null,
+    tipoDocumento: null,
+    nroReciboCaja: null,
+    solicitudCambio: null,
+    solicitudMotivo: null,
+    solicitudUsuario: null,
+    solicitudFecha: null,
+    revertidoPorUsuario: adminName,
+    revertidoPorRol: adminRole,
+    revertidoFecha: getColombiaDateTime().dateTimeStr
+  };
 
-  matchingIndices.forEach(i => {
-    current[i] = {
-      ...current[i],
-      identificada: false,
-      fechaIdentificacion: null,
-      usuarioIdentificacion: null,
-      asesor: null,
-      tipoDocumento: null,
-      nroReciboCaja: null,
-      justificacionIgnorado: null,
-      solicitudCambio: null,
-      solicitudMotivo: null,
-      solicitudUsuario: null,
-      solicitudFecha: null,
-      revertidoPorUsuario: adminName,
-      revertidoPorRol: adminRole,
-      revertidoFecha: revertTime
-    };
-  });
+  current[idx] = updatedTx;
 
-  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  matchingIndices.forEach(i => {
-    const docId = current[i].id;
-    if (docId) {
-      setDoc(doc(db, 'transactions', docId), current[i]).catch(err => {
-        console.error("Error reverting identification in Firestore:", err);
-      });
-    }
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
+    console.error("Error reverting identification in Firestore:", err);
   });
 
   addAuditLog(
     adminName,
     'Reversión de Identificación',
-    `Revirtió transacción ${targetId.slice(0, 15)}... (Era ${originalDoc || 'N/A'}, Asesor: ${originalAsesor || 'N/A'}) por ${adminRole}`
+    `Revirtió transacción ${id.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor}) por ${adminRole}`
   );
 
   return true;
@@ -1464,10 +1201,9 @@ export function revertIdentification(id: string, adminName: string, adminRole: s
 
 export function requestTransactionChange(id: string, user: User, reason: string): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
+  const idx = current.findIndex(tx => tx.id === id);
   if (idx === -1) return false;
 
-  const targetId = current[idx].id;
   const updatedTx = {
     ...current[idx],
     solicitudCambio: 'pendiente' as const,
@@ -1478,21 +1214,21 @@ export function requestTransactionChange(id: string, user: User, reason: string)
 
   current[idx] = updatedTx;
 
-  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
     console.error("Error requesting transaction change in Firestore:", err);
   });
 
   addAuditLog(
     user.nombre,
     'Solicitud de Cambio',
-    `Solicitó cambio/liberación para la transacción ${targetId.slice(-8).toUpperCase()} - Motivo: ${reason}`
+    `Solicitó cambio/liberación para la transacción ${id.slice(-8).toUpperCase()} - Motivo: ${reason}`
   );
 
   // Send automatic chat message to 'general' so both cashier and admin see it in the general chat
-  const msgText = `[REVERSION_PENDIENTE] Solicitud de Reversión\n• Colaborador: ${user.nombre}\n• Transacción: ${updatedTx.llaveUnica.slice(-12).toUpperCase()}\n• Valor: $${updatedTx.valor.toLocaleString()}\n• Sede: ${updatedTx.sede}\n• Motivo: "${reason}"\n• TxId: ${targetId}`;
+  const msgText = `[REVERSION_PENDIENTE] Solicitud de Reversión\n• Colaborador: ${user.nombre}\n• Transacción: ${updatedTx.llaveUnica.slice(-12).toUpperCase()}\n• Valor: $${updatedTx.valor.toLocaleString()}\n• Sede: ${updatedTx.sede}\n• Motivo: "${reason}"\n• TxId: ${id}`;
   
   sendChatMessage(
     user.id,
@@ -1517,10 +1253,9 @@ export function resolveTransactionChange(
   adminRole: string = 'Admin'
 ): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
+  const idx = current.findIndex(tx => tx.id === id);
   if (idx === -1) return false;
 
-  const targetId = current[idx].id;
   let updatedTx = { ...current[idx] };
 
   if (resolution === 'liberar') {
@@ -1542,7 +1277,7 @@ export function resolveTransactionChange(
     addAuditLog(
       adminName,
       'Liberación de Transacción',
-      `Aprobó liberación de transacción ${targetId.slice(-8).toUpperCase()} solicitada por ${updatedTx.solicitudUsuario} (${adminRole})`
+      `Aprobó liberación de transacción ${id.slice(-8).toUpperCase()} solicitada por ${updatedTx.solicitudUsuario} (${adminRole})`
     );
   } else {
     updatedTx = {
@@ -1559,16 +1294,16 @@ export function resolveTransactionChange(
     addAuditLog(
       adminName,
       'Corrección de Transacción',
-      `Corrigió directamente la transacción ${targetId.slice(-8).toUpperCase()} - Nuevo Doc: ${fields?.tipoDocumento}, Asesor: ${fields?.asesor || 'N/A'}`
+      `Corrigió directamente la transacción ${id.slice(-8).toUpperCase()} - Nuevo Doc: ${fields?.tipoDocumento}, Asesor: ${fields?.asesor || 'N/A'}`
     );
   }
 
   current[idx] = updatedTx;
 
-  safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
+  localStorage.setItem(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
+  setDoc(doc(db, 'transactions', id), updatedTx).catch(err => {
     console.error("Error resolving transaction change in Firestore:", err);
   });
 
@@ -2240,4 +1975,3 @@ export async function updateReportConfig(config: Partial<ReportConfig>): Promise
     }
   }
 }
-
