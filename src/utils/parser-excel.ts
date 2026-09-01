@@ -707,11 +707,6 @@ export function parseExcelBankFile(
       const oficina = String(row[oficinaColIdx] || '').trim();
       const comprobante = String(row[comprobanteColIdx] || '').trim();
 
-      // Discard corrupted rows where oficina contains cajera or if movement is irrelevant
-      if (oficina && (oficina.toLowerCase().includes('cajera') || oficina.toLowerCase().includes('(cajera)'))) {
-        continue;
-      }
-
       // Discard tax, fee, commission, or irrelevant movements
       if (esMovimientoIrrelevante(valor, desc, oficina)) {
         continue;
