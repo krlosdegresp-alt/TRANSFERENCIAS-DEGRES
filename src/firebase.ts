@@ -891,7 +891,28 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
     const existing = findMatchingDuplicateInIndex(tx, index);
     if (existing) {
       removedCount++;
-      const isNowIdentified = existing.identificada || tx.identificada;
+      // Determine which version has the newest status
+      const existingRevTime = existing.revertidoFecha ? parseTimestampMs(existing.revertidoFecha) : 0;
+      const txRevTime = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : 0;
+      const existingIdentTime = (existing.identificada && existing.fechaIdentificacion) ? parseTimestampMs(existing.fechaIdentificacion) : 0;
+      const txIdentTime = (tx.identificada && tx.fechaIdentificacion) ? parseTimestampMs(tx.fechaIdentificacion) : 0;
+
+      const latestRevTime = Math.max(existingRevTime, txRevTime);
+      const latestIdentTime = Math.max(existingIdentTime, txIdentTime);
+
+      let isNowIdentified = false;
+      let chosenDocForIdent = existing;
+      if (latestIdentTime > latestRevTime) {
+        isNowIdentified = true;
+        chosenDocForIdent = (txIdentTime >= existingIdentTime && tx.identificada) ? tx : existing;
+      } else if (latestRevTime > 0 && latestRevTime >= latestIdentTime) {
+        // Reversion is newer or equal: explicitly un-identified / pending
+        isNowIdentified = false;
+      } else {
+        isNowIdentified = existing.identificada || tx.identificada;
+        chosenDocForIdent = tx.identificada ? tx : existing;
+      }
+
       const bestComprobante = (isRealComprobante(tx.comprobante) ? tx.comprobante : null) ||
                               (isRealComprobante(existing.comprobante) ? existing.comprobante : null) ||
                               tx.comprobante || existing.comprobante || undefined;
@@ -905,12 +926,15 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
         esHistorico: existing.esHistorico && tx.esHistorico,
         comprobante: bestComprobante,
         oficina: bestOficina,
-        nroReciboCaja: existing.nroReciboCaja || tx.nroReciboCaja || null,
-        fechaIdentificacion: existing.fechaIdentificacion || tx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
-        usuarioIdentificacion: existing.usuarioIdentificacion || tx.usuarioIdentificacion || null,
-        asesor: existing.asesor || tx.asesor || null,
-        tipoDocumento: existing.tipoDocumento || tx.tipoDocumento || null,
-        justificacionIgnorado: existing.justificacionIgnorado || tx.justificacionIgnorado || null
+        nroReciboCaja: isNowIdentified ? (chosenDocForIdent.nroReciboCaja || null) : null,
+        fechaIdentificacion: isNowIdentified ? (chosenDocForIdent.fechaIdentificacion || getColombiaDateTime().dateTimeStr) : null,
+        usuarioIdentificacion: isNowIdentified ? (chosenDocForIdent.usuarioIdentificacion || null) : null,
+        asesor: isNowIdentified ? (chosenDocForIdent.asesor || null) : null,
+        tipoDocumento: isNowIdentified ? (chosenDocForIdent.tipoDocumento || null) : null,
+        justificacionIgnorado: isNowIdentified ? (chosenDocForIdent.justificacionIgnorado || null) : null,
+        revertidoPorUsuario: existing.revertidoPorUsuario || tx.revertidoPorUsuario || null,
+        revertidoPorRol: existing.revertidoPorRol || tx.revertidoPorRol || null,
+        revertidoFecha: existing.revertidoFecha || tx.revertidoFecha || null
       };
 
       if (tx.id && tx.id !== existing.id) {
@@ -1304,43 +1328,57 @@ export function updateTransactionFechaIdentificacion(
 
 export function revertIdentification(id: string, adminName: string, adminRole: string = 'Admin'): boolean {
   const current = getTransactions();
-  const idx = current.findIndex(tx => tx.id === id || tx.llaveUnica === id);
-  if (idx === -1) return false;
+  const matchingIndices: number[] = [];
+  current.forEach((tx, i) => {
+    if (tx.id === id || tx.llaveUnica === id) {
+      matchingIndices.push(i);
+    }
+  });
 
-  const targetId = current[idx].id;
-  const originalDoc = current[idx].tipoDocumento;
-  const originalAsesor = current[idx].asesor;
+  if (matchingIndices.length === 0) return false;
 
-  const updatedTx = {
-    ...current[idx],
-    identificada: false,
-    fechaIdentificacion: null,
-    usuarioIdentificacion: null,
-    asesor: null,
-    tipoDocumento: null,
-    nroReciboCaja: null,
-    solicitudCambio: null,
-    solicitudMotivo: null,
-    solicitudUsuario: null,
-    solicitudFecha: null,
-    revertidoPorUsuario: adminName,
-    revertidoPorRol: adminRole,
-    revertidoFecha: getColombiaDateTime().dateTimeStr
-  };
+  const firstTx = current[matchingIndices[0]];
+  const targetId = firstTx.id;
+  const originalDoc = firstTx.tipoDocumento;
+  const originalAsesor = firstTx.asesor;
+  const revertTime = getColombiaDateTime().dateTimeStr;
 
-  current[idx] = updatedTx;
+  matchingIndices.forEach(i => {
+    current[i] = {
+      ...current[i],
+      identificada: false,
+      fechaIdentificacion: null,
+      usuarioIdentificacion: null,
+      asesor: null,
+      tipoDocumento: null,
+      nroReciboCaja: null,
+      justificacionIgnorado: null,
+      solicitudCambio: null,
+      solicitudMotivo: null,
+      solicitudUsuario: null,
+      solicitudFecha: null,
+      revertidoPorUsuario: adminName,
+      revertidoPorRol: adminRole,
+      revertidoFecha: revertTime
+    };
+  });
 
   safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(current));
   notifyListeners();
 
-  setDoc(doc(db, 'transactions', targetId), updatedTx).catch(err => {
-    console.error("Error reverting identification in Firestore:", err);
+  matchingIndices.forEach(i => {
+    const docId = current[i].id;
+    if (docId) {
+      setDoc(doc(db, 'transactions', docId), current[i]).catch(err => {
+        console.error("Error reverting identification in Firestore:", err);
+      });
+    }
   });
 
   addAuditLog(
     adminName,
     'Reversión de Identificación',
-    `Revirtió transacción ${targetId.slice(0, 15)}... (Era ${originalDoc}, Asesor: ${originalAsesor}) por ${adminRole}`
+    `Revirtió transacción ${targetId.slice(0, 15)}... (Era ${originalDoc || 'N/A'}, Asesor: ${originalAsesor || 'N/A'}) por ${adminRole}`
   );
 
   return true;
