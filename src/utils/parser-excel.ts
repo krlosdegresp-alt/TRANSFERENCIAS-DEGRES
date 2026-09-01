@@ -260,20 +260,15 @@ export function detectarSede(cuentaStr: string): Sede {
  */
 export function esMovimientoIrrelevante(valor: number, descripcion: string, _oficina?: string): boolean {
   const absVal = Math.abs(Number(valor || 0));
-  // Discard anything less than $1,000 COP or invalid values
-  if (isNaN(absVal) || absVal < 1000) {
+  // Only discard 0 or invalid amounts
+  if (isNaN(absVal) || absVal <= 0) {
     return true;
   }
 
   const rawDesc = String(descripcion || '').trim();
-  if (!rawDesc) return true;
+  if (!rawDesc) return false;
 
-  // If description is just a short 1-2 digit number from corrupted column shifts
-  if (/^\d{1,2}$/.test(rawDesc)) {
-    return true;
-  }
-
-  // Normalize string: uppercase, remove accents/diacritics, collapse whitespace
+  // Normalize string
   const desc = rawDesc
     .toUpperCase()
     .normalize('NFD')
@@ -283,21 +278,12 @@ export function esMovimientoIrrelevante(valor: number, descripcion: string, _ofi
 
   if (!desc) return false;
 
-  // Pure bank taxes / GMF
-  const pureTaxPatterns = [
-    '4X1.000',
-    '4X1000',
-    '4 X 1000',
-    '4 X 1.000',
-    'GMF',
-    'GRAVAMEN A LOS MOVIMIENTOS FINANCIEROS',
-    'RETEFUENTE',
-    'RETEICA',
-    'RETEIVA',
-    'RETENCION EN LA FUENTE'
-  ];
+  // Only pure GMF tax under $10,000 COP with exact tax description is omitted
+  if (absVal < 10000 && (desc === '4X1.000' || desc === '4X1000' || desc === '4 X 1000' || desc === '4 X 1.000' || desc === 'GMF' || desc === 'GRAVAMEN A LOS MOVIMIENTOS FINANCIEROS')) {
+    return true;
+  }
 
-  return pureTaxPatterns.some(pattern => desc === pattern || desc.startsWith(pattern + ' '));
+  return false;
 }
 
 /**

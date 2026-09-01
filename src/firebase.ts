@@ -228,8 +228,13 @@ export function initializeRealtimeListeners() {
 
   // 2. Transactions listener
   onSnapshot(collection(db, 'transactions'), (snapshot) => {
-    // Cleaned transactions list
-    const rawList: Transaction[] = [];
+    // Current local transactions
+    const localTxs = getTransactions();
+    const txMap = new Map<string, Transaction>();
+    localTxs.forEach(t => {
+      if (t && t.id) txMap.set(t.id, t);
+    });
+
     snapshot.forEach(docSnap => {
       const data = docSnap.data() as Transaction;
       const parsedVal = Math.abs(Number(data.valor || 0));
@@ -240,15 +245,43 @@ export function initializeRealtimeListeners() {
         llaveUnica: data.llaveUnica || data.id || docSnap.id
       };
       if (!esMovimientoIrrelevante(tx.valor, tx.descripcion, tx.oficina)) {
-        rawList.push(tx);
+        const localExisting = txMap.get(tx.id);
+        if (localExisting) {
+          // If locally it was reverted or explicitly modified
+          const localRev = localExisting.revertidoFecha ? parseTimestampMs(localExisting.revertidoFecha) : (localExisting.revertidoPorUsuario ? 1 : 0);
+          const remoteRev = tx.revertidoFecha ? parseTimestampMs(tx.revertidoFecha) : (tx.revertidoPorUsuario ? 1 : 0);
+          const localIdent = (localExisting.identificada && localExisting.fechaIdentificacion) ? parseTimestampMs(localExisting.fechaIdentificacion) : 0;
+          const remoteIdent = (tx.identificada && tx.fechaIdentificacion) ? parseTimestampMs(tx.fechaIdentificacion) : 0;
+
+          if (localRev > 0 && localRev >= remoteIdent && localRev >= remoteRev) {
+            // Local reversion takes precedence as Pending
+            txMap.set(tx.id, {
+              ...tx,
+              ...localExisting,
+              identificada: false,
+              nroReciboCaja: null,
+              fechaIdentificacion: null,
+              usuarioIdentificacion: null,
+              asesor: null,
+              tipoDocumento: null,
+              justificacionIgnorado: null
+            });
+          } else {
+            txMap.set(tx.id, {
+              ...localExisting,
+              ...tx
+            });
+          }
+        } else {
+          txMap.set(tx.id, tx);
+        }
       }
     });
 
-    // Deduplicate any duplicate documents representation in memory
-    const { cleaned } = deduplicateTransactionList(rawList);
+    const combined = Array.from(txMap.values());
+    const { cleaned } = deduplicateTransactionList(combined);
 
     if (cleaned.length > 0 || snapshot.empty) {
-      // Sort: latest dates first
       cleaned.sort((a, b) => {
         const dateTimeA = `${a.fecha} ${a.hora || '00:00:00'}`;
         const dateTimeB = `${b.fecha} ${b.hora || '00:00:00'}`;
@@ -890,12 +923,6 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
   const oppositeAliasKey = getOppositeBankAliasKey(tx);
   if (oppositeAliasKey && index.byBankAlias.has(oppositeAliasKey)) {
     return index.byBankAlias.get(oppositeAliasKey)!;
-  }
-
-  // 5. Semantic match (with specific time)
-  const semKey = getSemanticKey(tx);
-  if (semKey && index.bySemantic.has(semKey)) {
-    return index.bySemantic.get(semKey)!;
   }
 
   return null;
