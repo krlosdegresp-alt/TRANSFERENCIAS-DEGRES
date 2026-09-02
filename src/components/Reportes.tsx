@@ -255,12 +255,14 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   ).reduce((sum, tx) => sum + tx.valor, 0);
 
-  // 2. Total Identified (Conciliado) for selected closure date & branch (strictly transactions of this date)
+  // 2. Total Identified (Conciliado) for selected closure date & branch:
+  // A transaction belongs to this closure if it was identified on cierreFecha (fechaIdentificacion),
+  // regardless of whether the bank deposit entered today or on an earlier day (e.g., yesterday or 31/08).
   const identifiedTxsCierre = transactions.filter(
     t => t.identificada &&
          t.sede === cierreSede &&
          !t.esHistorico &&
-         t.fecha === cierreFecha
+         ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
   );
   const rawIdentificadoCierre = identifiedTxsCierre.reduce((sum, tx) => sum + tx.valor, 0);
 
@@ -1452,7 +1454,14 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
                             </div>
                             <div className="flex justify-between items-center text-[9.5px] text-slate-500">
                               <span>Asesor: <strong className="text-slate-700">{tx.asesor || 'Sin Asesor'}</strong></span>
-                              <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                              <span className="flex items-center gap-1">
+                                {tx.fecha !== cierreFecha && (
+                                  <span className="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[8.5px]" title="Consignación bancaria de fecha previa">
+                                    Consignación: {formatDateHuman(tx.fecha)}
+                                  </span>
+                                )}
+                                <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                              </span>
                             </div>
                             <p className="text-[9px] text-slate-600 truncate" title={tx.descripcion}>{tx.descripcion}</p>
                           </div>

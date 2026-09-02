@@ -72,6 +72,9 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
   const [nroReciboCaja, setNroReciboCaja] = useState('');
   const [customFechaIdentificacion, setCustomFechaIdentificacion] = useState<string>('');
 
+  // Date filter mode: 'operacion' (default, matches closure/identification date for identified payments) vs 'banco' (bank extract date)
+  const [fechaTipoFilter, setFechaTipoFilter] = useState<'operacion' | 'banco'>('operacion');
+
   // Editing validation date for existing identified transactions
   const [editingDateTxId, setEditingDateTxId] = useState<string | null>(null);
   const [editingNewDate, setEditingNewDate] = useState<string>('');
@@ -162,8 +165,20 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     const valMax = parseFloat(montoMaxFilter);
     const matchesMax = isNaN(valMax) || tx.valor <= valMax;
 
-    // Strict date filtering: When filtering by date, only match transactions whose bank movement date matches exactly
-    const matchesFecha = !fechaFilter || tx.fecha === fechaFilter;
+    // Date filtering:
+    // When fechaTipoFilter === 'operacion' (default):
+    // - If transaction is identified, its operational date is when it was conciliated/identified (fechaIdentificacion).
+    //   This ensures that payments from previous days (e.g. 31/08 or 01/09) identified today appear in today's filter.
+    // - If transaction is pending, its date is its bank movement date (tx.fecha).
+    // When fechaTipoFilter === 'banco':
+    // - Matches strictly by the bank extract movement date (tx.fecha === fechaFilter).
+    const txEffectiveDate = fechaTipoFilter === 'banco'
+      ? tx.fecha
+      : (tx.identificada
+          ? (tx.fechaIdentificacion ? tx.fechaIdentificacion.slice(0, 10) : tx.fecha)
+          : tx.fecha);
+
+    const matchesFecha = !fechaFilter || txEffectiveDate === fechaFilter;
 
     const txCuentaClean = (tx.cuenta || '').toLowerCase();
     let matchesCuenta = false;
@@ -246,15 +261,19 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     }
   };
 
-  // Calculations for Cierre de Caja: strictly match transactions from the closure date
+  // Calculations for Cierre de Caja:
+  // 1. Bank movements recorded on the closure date:
   const bankPaymentsForDate = transactions.filter(
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   );
+  // 2. Payments identified for this closure:
+  // Includes all transactions identified on cierreFecha (fechaIdentificacion),
+  // even if the customer consigned on an earlier day (e.g. 31/08 or 01/09).
   const identifiedPaymentsForDate = transactions.filter(
     t => t.identificada &&
          t.sede === cierreSede &&
          !t.esHistorico &&
-         t.fecha === cierreFecha
+         ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
   );
 
   const numIdentificadosCierre = identifiedPaymentsForDate.length;
@@ -559,7 +578,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
           </select>
 
           {/* Date Filter */}
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1.5">
             <input
               id="filter-date-input"
               type="date"
@@ -576,7 +595,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                     ? 'bg-[#1A2D7C] text-white' 
                     : 'text-slate-600 hover:bg-slate-50'
                 }`}
-                title="Filtrar solo transacciones del día de Hoy"
+                title="Filtrar por la jornada de Hoy"
               >
                 Hoy
               </button>
@@ -595,7 +614,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                     ? 'bg-[#1A2D7C] text-white' 
                     : 'text-slate-600 hover:bg-slate-50'
                 }`}
-                title="Filtrar solo transacciones del día de Ayer"
+                title="Filtrar por la jornada de Ayer"
               >
                 Ayer
               </button>
@@ -603,13 +622,43 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                 <button
                   type="button"
                   onClick={() => setFechaFilter('')}
-                  className="px-2 py-2 text-rose-600 hover:bg-rose-50 border-l border-slate-200 transition-colors cursor-pointer"
-                  title="Ver todas las fechas"
+                  className="px-2 py-2 text-rose-600 hover:bg-rose-50 border-l border-slate-200 transition-colors cursor-pointer font-bold"
+                  title="Limpiar filtro de fecha (Ver todas)"
                 >
                   ✕
                 </button>
               )}
             </div>
+
+            {/* Selector: Cierre/Validación vs Fecha Extracto */}
+            {fechaFilter && (
+              <div className="flex border border-slate-200 rounded-xl overflow-hidden bg-white text-[9px] font-black uppercase tracking-wider shadow-xs" title="Modo de filtrado por fecha">
+                <button
+                  type="button"
+                  onClick={() => setFechaTipoFilter('operacion')}
+                  className={`px-2.5 py-2 transition-colors cursor-pointer ${
+                    fechaTipoFilter === 'operacion'
+                      ? 'bg-emerald-700 text-white font-black'
+                      : 'text-slate-500 hover:bg-slate-50'
+                  }`}
+                  title="Filtra por la fecha de Cierre / Validación en caja (incluye pagos anteriores identificados hoy)"
+                >
+                  Día de Cierre
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFechaTipoFilter('banco')}
+                  className={`px-2.5 py-2 transition-colors cursor-pointer border-l border-slate-200 ${
+                    fechaTipoFilter === 'banco'
+                      ? 'bg-indigo-700 text-white font-black'
+                      : 'text-slate-500 hover:bg-slate-50'
+                  }`}
+                  title="Filtra estrictamente por la fecha en que el abono entró al extracto bancario"
+                >
+                  Día de Banco
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Comprobante / Ref Filter Input */}
@@ -785,8 +834,25 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
 
                       {/* Date & Hour */}
                       <td className="px-6 py-4.5 text-slate-600 font-mono">
-                        <div className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">{formatDateHuman(tx.fecha)}</div>
-                        {tx.hora && <div className="text-[10px] mt-0.5 text-slate-400 font-bold">{tx.hora}</div>}
+                        {tx.identificada && tx.fechaIdentificacion && tx.fechaIdentificacion.slice(0, 10) !== tx.fecha ? (
+                          <div>
+                            <div className="flex items-center gap-1 font-black text-[#1A2D7C] text-[11px] uppercase tracking-wider">
+                              <span>{formatDateHuman(tx.fechaIdentificacion.slice(0, 10))}</span>
+                              <span className="text-[8px] bg-indigo-100 text-[#1A2D7C] px-1 py-0.5 rounded font-black tracking-tight uppercase" title="Fecha en que fue identificado en caja">
+                                Cierre
+                              </span>
+                            </div>
+                            <div className="text-[9.5px] mt-0.5 text-amber-700 font-bold flex items-center gap-1" title="Fecha original del extracto bancario">
+                              <span>Banco: {formatDateHuman(tx.fecha)}</span>
+                              {tx.hora && <span>• {tx.hora}</span>}
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">{formatDateHuman(tx.fecha)}</div>
+                            {tx.hora && <div className="text-[10px] mt-0.5 text-slate-400 font-bold">{tx.hora}</div>}
+                          </div>
+                        )}
                       </td>
 
                       {/* Dedicated # Comprobante / Ref Column */}
@@ -1494,7 +1560,14 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                               </div>
                               <div className="flex justify-between items-center text-[9.5px] text-slate-500">
                                 <span>Asesor: <strong className="text-slate-700">{tx.asesor || 'Sin Asesor'}</strong></span>
-                                <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                                <span className="flex items-center gap-1">
+                                  {tx.fecha !== cierreFecha && (
+                                    <span className="bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded text-[8.5px]" title="Dinero consignado en fecha anterior">
+                                      Consignación: {formatDateHuman(tx.fecha)}
+                                    </span>
+                                  )}
+                                  <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                                </span>
                               </div>
                               <p className="text-[9px] text-slate-600 truncate" title={tx.descripcion}>{tx.descripcion}</p>
                             </div>
@@ -1596,7 +1669,14 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
                               </div>
                               <div className="flex justify-between items-center text-[9.5px] text-slate-300">
                                 <span>Asesor: <strong className="text-white">{tx.asesor || 'Sin Asesor'}</strong></span>
-                                <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                                <span className="flex items-center gap-1">
+                                  {tx.fecha !== cierreFecha && (
+                                    <span className="bg-amber-400 text-slate-950 font-black px-1.5 py-0.5 rounded text-[8.5px]" title="Dinero consignado en fecha anterior">
+                                      Consignación previa: {formatDateHuman(tx.fecha)}
+                                    </span>
+                                  )}
+                                  <span>Banco: {tx.fecha} • {formatTime12h(tx.hora)}</span>
+                                </span>
                               </div>
                               <p className="text-[9px] text-slate-400 truncate" title={tx.descripcion}>{tx.descripcion}</p>
                             </div>
