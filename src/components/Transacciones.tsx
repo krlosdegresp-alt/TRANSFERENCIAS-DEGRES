@@ -162,8 +162,8 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     const valMax = parseFloat(montoMaxFilter);
     const matchesMax = isNaN(valMax) || tx.valor <= valMax;
 
-    const txFechaIdent = tx.fechaIdentificacion ? tx.fechaIdentificacion.slice(0, 10) : tx.fecha;
-    const matchesFecha = !fechaFilter || tx.fecha === fechaFilter || (tx.identificada && txFechaIdent === fechaFilter);
+    // Strict date filtering: When filtering by date, only match transactions whose bank movement date matches exactly
+    const matchesFecha = !fechaFilter || tx.fecha === fechaFilter;
 
     const txCuentaClean = (tx.cuenta || '').toLowerCase();
     let matchesCuenta = false;
@@ -246,7 +246,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     }
   };
 
-  // Calculations for Cierre de Caja
+  // Calculations for Cierre de Caja: strictly match transactions from the closure date
   const bankPaymentsForDate = transactions.filter(
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   );
@@ -254,7 +254,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
     t => t.identificada &&
          t.sede === cierreSede &&
          !t.esHistorico &&
-         ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
+         t.fecha === cierreFecha
   );
 
   const numIdentificadosCierre = identifiedPaymentsForDate.length;
@@ -264,7 +264,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
 
   const activeCierres = cierresCajaList;
   const currentCierre = activeCierres.find(c => c.fecha === cierreFecha && c.sede === cierreSede);
-  const isAlreadyClosed = !!currentCierre;
+  const isAlreadyClosed = !!currentCierre && currentCierre.bloqueado !== false;
 
   const handleGuardarCierre = (e: React.FormEvent) => {
     e.preventDefault();
@@ -559,7 +559,7 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
           </select>
 
           {/* Date Filter */}
-          <div className="relative">
+          <div className="flex items-center gap-1">
             <input
               id="filter-date-input"
               type="date"
@@ -567,6 +567,49 @@ export default function Transacciones({ currentUser, transactions, onRefreshData
               onChange={(e) => setFechaFilter(e.target.value)}
               className="text-xs font-bold border border-slate-200 rounded-xl px-3 py-2 bg-white text-slate-700 focus:ring-2 focus:ring-[#1A2D7C]/20 focus:border-[#1A2D7C] outline-none cursor-pointer"
             />
+            <div className="flex border border-slate-200 rounded-xl overflow-hidden bg-white text-[10px] font-black uppercase tracking-wider">
+              <button
+                type="button"
+                onClick={() => setFechaFilter(getColombiaDateTime().dateStr)}
+                className={`px-2.5 py-2 transition-colors cursor-pointer ${
+                  fechaFilter === getColombiaDateTime().dateStr 
+                    ? 'bg-[#1A2D7C] text-white' 
+                    : 'text-slate-600 hover:bg-slate-50'
+                }`}
+                title="Filtrar solo transacciones del día de Hoy"
+              >
+                Hoy
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  now.setDate(now.getDate() - 1);
+                  const y = now.getFullYear();
+                  const m = String(now.getMonth() + 1).padStart(2, '0');
+                  const d = String(now.getDate()).padStart(2, '0');
+                  setFechaFilter(`${y}-${m}-${d}`);
+                }}
+                className={`px-2.5 py-2 transition-colors cursor-pointer border-l border-slate-200 ${
+                  fechaFilter && fechaFilter !== getColombiaDateTime().dateStr
+                    ? 'bg-[#1A2D7C] text-white' 
+                    : 'text-slate-600 hover:bg-slate-50'
+                }`}
+                title="Filtrar solo transacciones del día de Ayer"
+              >
+                Ayer
+              </button>
+              {fechaFilter && (
+                <button
+                  type="button"
+                  onClick={() => setFechaFilter('')}
+                  className="px-2 py-2 text-rose-600 hover:bg-rose-50 border-l border-slate-200 transition-colors cursor-pointer"
+                  title="Ver todas las fechas"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Comprobante / Ref Filter Input */}

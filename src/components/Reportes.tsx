@@ -255,12 +255,12 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   ).reduce((sum, tx) => sum + tx.valor, 0);
 
-  // 2. Total Identified (Conciliado) for selected closure date & branch (por fecha de IDENTIFICACIÓN)
+  // 2. Total Identified (Conciliado) for selected closure date & branch (strictly transactions of this date)
   const identifiedTxsCierre = transactions.filter(
     t => t.identificada &&
          t.sede === cierreSede &&
          !t.esHistorico &&
-         ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
+         t.fecha === cierreFecha
   );
   const rawIdentificadoCierre = identifiedTxsCierre.reduce((sum, tx) => sum + tx.valor, 0);
 

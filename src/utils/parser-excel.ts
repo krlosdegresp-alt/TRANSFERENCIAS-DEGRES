@@ -595,8 +595,15 @@ export function parseExcelBankFile(
         const fechaValVal = fechaValCol >= 0 ? String(row[fechaValCol] || '').trim() : '';
         const fechaIdentificacion = (fechaValVal && !['ninguno', 'null', 'n/a', 'na'].includes(fechaValVal.toLowerCase())) ? fechaValVal : null;
 
-        const identificada = ['CONCILIADO', 'IDENTIFICADA', 'IDENTIFICADO', 'S', 'SI', 'SÍ', 'TRUE', '1'].includes(estadoStr) || 
-          !!usuarioIdentificacion || !!fechaIdentificacion || !!nroReciboCaja;
+        // A transaction can only be marked as identified if it has legitimate reconciliation data:
+        // Must have a receipt number (nroReciboCaja), or be Ignorado, or have a document type with receipt/asesor.
+        // It must NEVER be marked as identified simply because an auxiliary user or date column exists.
+        const hasRecibo = !!nroReciboCaja;
+        const isIgnorado = tipoDocumento === 'Ignorado';
+        const hasExplicitDoc = !!tipoDocumento && (hasRecibo || !!asesor);
+        const hasExplicitConciliadoStatus = ['CONCILIADO', 'IDENTIFICADA', 'IDENTIFICADO'].includes(estadoStr);
+
+        const identificada = (hasRecibo || isIgnorado || hasExplicitDoc) || (hasExplicitConciliadoStatus && (hasRecibo || hasExplicitDoc || isIgnorado));
 
         // Extract Llave Unica or generate deterministic key
         let llave = llaveCol >= 0 ? String(row[llaveCol] || '').trim() : '';
@@ -617,11 +624,11 @@ export function parseExcelBankFile(
           cuenta,
           sede,
           identificada,
-          fechaIdentificacion,
-          usuarioIdentificacion,
-          asesor,
-          tipoDocumento,
-          nroReciboCaja,
+          fechaIdentificacion: identificada ? fechaIdentificacion : null,
+          usuarioIdentificacion: identificada ? usuarioIdentificacion : null,
+          asesor: identificada ? asesor : null,
+          tipoDocumento: identificada ? tipoDocumento : null,
+          nroReciboCaja: identificada ? nroReciboCaja : null,
           comprobante,
           oficina,
           fechaCarga: currentTimestamp,

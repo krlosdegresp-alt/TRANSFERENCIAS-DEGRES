@@ -195,8 +195,23 @@ export function initializeRealtimeListeners() {
       txList.push(docSnap.data() as Transaction);
     });
 
+    // Clean any phantom identifications (e.g. transactions marked as identified without valid receipt or doc)
+    const { cleaned: sanitizedList, fixedPhantoms, phantomIds } = sanitizeTransactions(txList);
+    if (fixedPhantoms > 0 && phantomIds.length > 0) {
+      console.warn(`[Sanitizer] Repaired ${fixedPhantoms} phantom identified transactions:`, phantomIds);
+      // Persist the sanitized state to Firestore so the database is healed permanently
+      phantomIds.forEach(id => {
+        const repairedTx = sanitizedList.find(t => t.id === id);
+        if (repairedTx) {
+          setDoc(doc(db, 'transactions', id), repairedTx).catch(err => {
+            console.error("Error updating sanitized transaction in Firestore:", err);
+          });
+        }
+      });
+    }
+
     // Auto-deduplicate stored snapshot transactions
-    const { cleaned } = deduplicateTransactionList(txList);
+    const { cleaned } = deduplicateTransactionList(sanitizedList);
 
     // Sort: latest dates first
     cleaned.sort((a, b) => {
@@ -586,7 +601,12 @@ export function getTransactions(): Transaction[] {
   const data = localStorage.getItem(STORAGE_TRANS_KEY);
   if (!data) return [];
   try {
-    return JSON.parse(data) as Transaction[];
+    const list = JSON.parse(data) as Transaction[];
+    const { cleaned, fixedPhantoms } = sanitizeTransactions(list);
+    if (fixedPhantoms > 0) {
+      safeSetLocalStorage(STORAGE_TRANS_KEY, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (e) {
     return [];
   }
@@ -782,6 +802,73 @@ function findMatchingDuplicateInIndex(tx: Transaction, index: TransactionIndex):
   return null;
 }
 
+// ----------------------------------------------------
+// TRANSACTION SANITIZATION & DEDUPLICATION
+// ----------------------------------------------------
+export function sanitizeTransactions(txList: Transaction[]): { 
+  cleaned: Transaction[]; 
+  fixedPhantoms: number;
+  phantomIds: string[];
+} {
+  let fixedPhantoms = 0;
+  const phantomIds: string[] = [];
+
+  const cleaned = txList.map(tx => {
+    const rawTipoDoc = String(tx.tipoDocumento || '').trim();
+    const hasDoc = !!(rawTipoDoc && rawTipoDoc !== 'null' && rawTipoDoc !== 'Ninguno');
+    const rawRecibo = String(tx.nroReciboCaja || '').trim();
+    const hasRecibo = !!(rawRecibo && rawRecibo !== 'null' && rawRecibo !== 'Ninguno');
+    const isIgnorado = tx.tipoDocumento === 'Ignorado';
+    const rawJust = String(tx.justificacionIgnorado || '').trim();
+    const hasIgnoradoJust = !!(rawJust && rawJust !== 'null');
+
+    // A transaction is ONLY genuinely identified if:
+    // 1) Ignorado with valid justification
+    // 2) Has a receipt/remisión number (nroReciboCaja)
+    // 3) Has explicit document type and (receipt OR asesor with date)
+    const isLegitIdentified = tx.identificada && (
+      (isIgnorado && hasIgnoradoJust) ||
+      (hasDoc && hasRecibo) ||
+      hasRecibo ||
+      (hasDoc && !!tx.asesor && !!tx.fechaIdentificacion)
+    );
+
+    // If marked identified but lacks genuine reconciliation data (phantom identification):
+    if (tx.identificada && !isLegitIdentified) {
+      fixedPhantoms++;
+      phantomIds.push(tx.id);
+      return {
+        ...tx,
+        identificada: false,
+        fechaIdentificacion: null,
+        usuarioIdentificacion: null,
+        asesor: null,
+        tipoDocumento: null,
+        nroReciboCaja: null,
+        justificacionIgnorado: null
+      };
+    }
+
+    // Also: if not identificada, clear any stray identification fields that could mislead filters/views
+    if (!tx.identificada && (tx.usuarioIdentificacion || tx.fechaIdentificacion || tx.tipoDocumento || tx.nroReciboCaja)) {
+      return {
+        ...tx,
+        identificada: false,
+        fechaIdentificacion: null,
+        usuarioIdentificacion: null,
+        asesor: null,
+        tipoDocumento: null,
+        nroReciboCaja: null,
+        justificacionIgnorado: null
+      };
+    }
+
+    return tx;
+  });
+
+  return { cleaned, fixedPhantoms, phantomIds };
+}
+
 export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Transaction[]; removedCount: number } {
   const cleaned: Transaction[] = [];
   let removedCount = 0;
@@ -791,19 +878,22 @@ export function deduplicateTransactionList(txs: Transaction[]): { cleaned: Trans
     const existing = findMatchingDuplicateInIndex(tx, index);
     if (existing) {
       removedCount++;
-      const isNowIdentified = existing.identificada || tx.identificada;
+      const isIncomingIdentified = !!(tx.identificada && (tx.nroReciboCaja || tx.tipoDocumento));
+      const isExistingIdentified = !!(existing.identificada && (existing.nroReciboCaja || existing.tipoDocumento));
+      const isNowIdentified = isExistingIdentified || isIncomingIdentified;
+
       const merged: Transaction = {
         ...existing,
         identificada: isNowIdentified,
         esHistorico: existing.esHistorico && tx.esHistorico,
         comprobante: existing.comprobante || tx.comprobante || undefined,
         oficina: existing.oficina || tx.oficina || undefined,
-        nroReciboCaja: existing.nroReciboCaja || tx.nroReciboCaja || null,
-        fechaIdentificacion: existing.fechaIdentificacion || tx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
-        usuarioIdentificacion: existing.usuarioIdentificacion || tx.usuarioIdentificacion || null,
-        asesor: existing.asesor || tx.asesor || null,
-        tipoDocumento: existing.tipoDocumento || tx.tipoDocumento || null,
-        justificacionIgnorado: existing.justificacionIgnorado || tx.justificacionIgnorado || null
+        nroReciboCaja: isNowIdentified ? (existing.nroReciboCaja || tx.nroReciboCaja || null) : null,
+        fechaIdentificacion: isNowIdentified ? (existing.fechaIdentificacion || tx.fechaIdentificacion || null) : null,
+        usuarioIdentificacion: isNowIdentified ? (existing.usuarioIdentificacion || tx.usuarioIdentificacion || null) : null,
+        asesor: isNowIdentified ? (existing.asesor || tx.asesor || null) : null,
+        tipoDocumento: isNowIdentified ? (existing.tipoDocumento || tx.tipoDocumento || null) : null,
+        justificacionIgnorado: isNowIdentified ? (existing.justificacionIgnorado || tx.justificacionIgnorado || null) : null
       };
 
       const idx = cleaned.findIndex(c => c.id === existing.id);
@@ -880,19 +970,22 @@ export async function uploadBankTransactions(
 
     if (existingTx) {
       duplicates++;
-      const isNowIdentified = tx.identificada || existingTx.identificada;
+      const isIncomingIdentified = !!(tx.identificada && (tx.nroReciboCaja || tx.tipoDocumento));
+      const isExistingIdentified = !!(existingTx.identificada && (existingTx.nroReciboCaja || existingTx.tipoDocumento));
+      const isNowIdentified = isExistingIdentified || isIncomingIdentified;
+
       const updatedTx: Transaction = {
         ...existingTx,
         identificada: isNowIdentified,
         esHistorico: false, // Restore / un-archive transaction on re-import
         comprobante: tx.comprobante || existingTx.comprobante,
         oficina: tx.oficina || existingTx.oficina,
-        nroReciboCaja: tx.nroReciboCaja || existingTx.nroReciboCaja,
-        fechaIdentificacion: tx.fechaIdentificacion || existingTx.fechaIdentificacion || (isNowIdentified ? getColombiaDateTime().dateTimeStr : null),
-        usuarioIdentificacion: tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || uploaderName,
-        asesor: tx.asesor || existingTx.asesor || null,
-        tipoDocumento: tx.tipoDocumento || existingTx.tipoDocumento || null,
-        justificacionIgnorado: tx.justificacionIgnorado || existingTx.justificacionIgnorado || null
+        nroReciboCaja: isNowIdentified ? (tx.nroReciboCaja || existingTx.nroReciboCaja || null) : null,
+        fechaIdentificacion: isNowIdentified ? (tx.fechaIdentificacion || existingTx.fechaIdentificacion || null) : null,
+        usuarioIdentificacion: isNowIdentified ? (tx.usuarioIdentificacion || existingTx.usuarioIdentificacion || null) : null,
+        asesor: isNowIdentified ? (tx.asesor || existingTx.asesor || null) : null,
+        tipoDocumento: isNowIdentified ? (tx.tipoDocumento || existingTx.tipoDocumento || null) : null,
+        justificacionIgnorado: isNowIdentified ? (tx.justificacionIgnorado || existingTx.justificacionIgnorado || null) : null
       };
       currentMap.set(existingTx.id, updatedTx);
       index.byId.set(updatedTx.id, updatedTx);
