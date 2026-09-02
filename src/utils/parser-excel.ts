@@ -360,8 +360,7 @@ export function parseExcelBankFile(
   const currentTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const list: Transaction[] = [];
   
-  // Track occurrences within the workbook so multiple identical rows (e.g. 2 identical QR payments)
-  // in rows 8 and 9 receive unique deterministic keys (index 0 for row 8, index 1 (_o1) for row 9)
+  // Track occurrences within the workbook so multiple identical rows receive deterministic unique keys
   const occurrenceCounts: Record<string, number> = {};
 
   // Iterate over ALL worksheets in the workbook
@@ -369,15 +368,23 @@ export function parseExcelBankFile(
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) continue;
 
-    // Skip sheets that are clearly closures, logs, user tables, or summaries
     const lowerSheet = sheetName.trim().toLowerCase();
+
+    // Skip sheets that are exclusively closures, logs, user tables, or configurations
     if (
-      lowerSheet.includes('cierre') || 
+      (lowerSheet.includes('cierre') || lowerSheet.includes('cierres')) &&
+      !lowerSheet.includes('trans') && 
+      !lowerSheet.includes('movim') && 
+      !lowerSheet.includes('hist')
+    ) {
+      continue;
+    }
+
+    if (
       lowerSheet.includes('auditoria') || 
       lowerSheet.includes('audit') || 
       lowerSheet.includes('usuario') || 
       lowerSheet.includes('user') || 
-      lowerSheet.includes('resumen') ||
       lowerSheet.includes('config') ||
       lowerSheet.includes('log')
     ) {
@@ -387,32 +394,45 @@ export function parseExcelBankFile(
     const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
     if (!rawRows || rawRows.length === 0) continue;
 
-    // Check if sheet rows contain cash closures table headers (e.g. Sede, Fecha, Cajera, Declarado, Aplicativo, Coincide)
-    const isCierresSheet = rawRows.slice(0, 10).some(row =>
-      row && row.some(cell => {
-        const str = String(cell || '').trim().toLowerCase();
-        return (
-          str.includes('cajera') || 
-          str.includes('declarado') || 
-          str.includes('total identificado') || 
-          str.includes('total aplicativo') ||
-          (str.includes('cierre') && str.includes('caja'))
-        );
-      })
-    );
-    if (isCierresSheet) {
-      continue;
+    // Check if the sheet name itself identifies a Sede
+    const sheetNameSede = detectarSede(sheetName);
+
+    // Search top metadata rows (rows 0..20) for any account number / Sede header
+    let sheetMetadataSede: Sede = 'Desconocida';
+    let sheetMetadataCuenta: string = '';
+
+    for (let r = 0; r < Math.min(20, rawRows.length); r++) {
+      const row = rawRows[r];
+      if (!row) continue;
+      for (const cell of row) {
+        if (cell !== undefined && cell !== null) {
+          const cellStr = String(cell);
+          const detected = detectarSede(cellStr);
+          if (detected !== 'Desconocida' && sheetMetadataSede === 'Desconocida') {
+            sheetMetadataSede = detected;
+            sheetMetadataCuenta = cellStr.trim();
+          }
+        }
+      }
     }
 
-    // Check if this sheet is an exported report from our application
+    // Step 1: Detect if this sheet is an exported report or backup workbook
     let isExportedReport = false;
     let reportHeaderIdx = -1;
 
-    for (let r = 0; r < Math.min(8, rawRows.length); r++) {
+    for (let r = 0; r < Math.min(25, rawRows.length); r++) {
       const row = rawRows[r];
       if (row && row.some(cell => {
         const str = String(cell || '').trim().toLowerCase();
-        return str.includes('llave unica') || str.includes('llave única') || str === 'llave';
+        return (
+          str.includes('llave unica') || 
+          str.includes('llave única') || 
+          str === 'llave' || 
+          str === 'llave_unica' ||
+          str === 'id transacción' ||
+          str === 'id transaccion' ||
+          (str.includes('comprobante') && row.some(c => String(c || '').toLowerCase().includes('valor cop')))
+        );
       })) {
         isExportedReport = true;
         reportHeaderIdx = r;
@@ -422,19 +442,36 @@ export function parseExcelBankFile(
 
     if (isExportedReport) {
       const headerRow = rawRows[reportHeaderIdx];
-      const llaveCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('llave'));
+      const llaveCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('llave') || str === 'id' || str.includes('id trans');
+      });
       const fechaCol = headerRow.findIndex((c: any) => {
         const str = String(c || '').trim().toLowerCase();
-        return str.includes('fecha') && !str.includes('valida') && !str.includes('carga');
+        return (str.includes('fecha') || str.includes('fec') || str === 'date') && 
+          !str.includes('valida') && !str.includes('carga') && !str.includes('cierre') && !str.includes('registro');
       });
-      const horaCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('hora'));
-      const descCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('descripci'));
-      const valorCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('valor'));
+      const horaCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('hora') || str === 'time';
+      });
+      const descCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('descripc') || str.includes('concepto') || str.includes('detalle') || str.includes('movimiento') || str === 'desc';
+      });
+      const valorCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return (str.includes('valor') || str.includes('monto') || str.includes('importe') || str.includes('credito') || str.includes('crédito') || str.includes('ingreso') || str.includes('abono') || str.includes('deposito') || str.includes('depósito') || str.includes('total') || str.includes('cop') || str.includes('vr')) &&
+          !str.includes('declarado') && !str.includes('aplicativo') && !str.includes('diferencia') && !str.includes('descuadre');
+      });
       const cuentaCol = headerRow.findIndex((c: any) => {
         const str = String(c || '').trim().toLowerCase();
-        return str.includes('cuenta') || str.includes('banco');
+        return str.includes('cuenta') || str.includes('cta') || str.includes('banco') || str.includes('producto');
       });
-      const sedeCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('sede'));
+      const sedeCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('sede') || str.includes('sucursal') || str.includes('oficina');
+      });
       const estadoCol = headerRow.findIndex((c: any) => {
         const str = String(c || '').trim().toLowerCase();
         return str.includes('estado') || str.includes('identifica') || str.includes('concilia');
@@ -449,9 +486,12 @@ export function parseExcelBankFile(
       });
       const oficinaCol = headerRow.findIndex((c: any) => {
         const str = String(c || '').trim().toLowerCase();
-        return str.includes('oficina') || str.includes('sucursal');
+        return str.includes('oficina') || str.includes('canal') || str.includes('plaza') || str.includes('agencia');
       });
-      const asesorCol = headerRow.findIndex((c: any) => String(c || '').trim().toLowerCase().includes('asesor'));
+      const asesorCol = headerRow.findIndex((c: any) => {
+        const str = String(c || '').trim().toLowerCase();
+        return str.includes('asesor') || str.includes('responsable') || str.includes('vendedor');
+      });
       const tipoDocCol = headerRow.findIndex((c: any) => {
         const str = String(c || '').trim().toLowerCase();
         return str.includes('tipo') || str.includes('documento');
@@ -462,53 +502,110 @@ export function parseExcelBankFile(
       });
       const fechaValCol = headerRow.findIndex((c: any) => {
         const str = String(c || '').trim().toLowerCase();
-        return str.includes('fecha val') || str.includes('fecha de val') || str.includes('fecha de identificac') || str.includes('fecha identificac');
+        return str.includes('fecha val') || str.includes('fecha de val') || str.includes('fecha identificac') || str.includes('fecha de identificac') || str.includes('fecha validacion');
       });
 
       for (let r = reportHeaderIdx + 1; r < rawRows.length; r++) {
         const row = rawRows[r];
         if (!row || row.length < 2) continue;
 
-        const llave = String(row[llaveCol] || '').trim();
-        if (!llave || llave.toLowerCase().includes('llave')) continue;
+        // Extract Date
+        let fechaStr = fechaCol >= 0 ? parseExcelDate(row[fechaCol]) : '';
+        if (!fechaStr) {
+          for (let colIdx = 0; colIdx < row.length; colIdx++) {
+            const cand = parseExcelDate(row[colIdx]);
+            if (cand && cand.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              fechaStr = cand;
+              break;
+            }
+          }
+        }
+        if (!fechaStr) continue;
 
-        let fechaStr = parseExcelDate(row[fechaCol]);
-        let horaStr = String(row[horaCol] || '').trim();
-        if (horaStr === 'No especificada') {
+        // Extract Time
+        let horaStr = horaCol >= 0 ? String(row[horaCol] || '').trim() : '';
+        if (horaStr === 'No especificada' || horaStr.toLowerCase() === 'null') {
           horaStr = '';
         }
 
-        const desc = String(row[descCol] || '').trim().toUpperCase();
-        const valor = parseColombianNumber(row[valorCol]);
+        // Extract Description
+        let desc = descCol >= 0 ? String(row[descCol] || '').trim().toUpperCase() : '';
+        if (!desc) desc = 'TRANSFERENCIA BANCARIA';
+
+        // Extract Valor
+        let valor = valorCol >= 0 ? parseColombianNumber(row[valorCol]) : NaN;
+        if (isNaN(valor) || valor <= 0) {
+          for (let colIdx = 0; colIdx < row.length; colIdx++) {
+            if (colIdx === fechaCol || colIdx === horaCol) continue;
+            const cand = parseColombianNumber(row[colIdx]);
+            if (!isNaN(cand) && cand > 0) {
+              valor = cand;
+              break;
+            }
+          }
+        }
         if (isNaN(valor) || valor <= 0) continue;
         if (esMovimientoIrrelevante(valor, desc)) continue;
 
-        const cuenta = String(row[cuentaCol] || '').trim();
-        const sede = (String(row[sedeCol] || '').trim() || fallbackSede) as Sede;
+        // Extract Account
+        let cuenta = cuentaCol >= 0 ? String(row[cuentaCol] || '').trim() : '';
+        if (!cuenta) {
+          cuenta = sheetMetadataCuenta || (fallbackSede === 'Guayabal' ? '101-574965-19' : fallbackSede === 'Sabaneta' ? '101-724709-16' : fallbackSede === 'Naranjal' ? '101-724768-07' : '');
+        }
 
-        const estadoStr = String(row[estadoCol] || '').trim().toUpperCase();
-        const identificada = ['CONCILIADO', 'IDENTIFICADA', 'S', 'SI', 'SÍ', 'TRUE', '1'].includes(estadoStr);
+        // Extract Sede
+        let rawSede = sedeCol >= 0 ? String(row[sedeCol] || '').trim() : '';
+        let sede: Sede = 'Desconocida';
+        if (rawSede) {
+          const detectedSede = detectarSede(rawSede);
+          if (detectedSede !== 'Desconocida') {
+            sede = detectedSede;
+          } else if (['Guayabal', 'Sabaneta', 'Naranjal'].includes(rawSede)) {
+            sede = rawSede as Sede;
+          }
+        }
+        if (sede === 'Desconocida') {
+          sede = detectarSede(cuenta) !== 'Desconocida' ? detectarSede(cuenta) : 
+                 sheetMetadataSede !== 'Desconocida' ? sheetMetadataSede : 
+                 sheetNameSede !== 'Desconocida' ? sheetNameSede : 
+                 fallbackSede;
+        }
 
-        const comprobanteVal = String(row[comprobanteCol] || '').trim();
-        const comprobante = (comprobanteVal && comprobanteVal !== 'Ninguno') ? comprobanteVal : undefined;
+        // Extract Status
+        const estadoStr = estadoCol >= 0 ? String(row[estadoCol] || '').trim().toUpperCase() : '';
+        
+        const comprobanteVal = comprobanteCol >= 0 ? String(row[comprobanteCol] || '').trim() : '';
+        const comprobante = (comprobanteVal && !['ninguno', 'null', 'n/a', 'na', '-', '--', '• -'].includes(comprobanteVal.toLowerCase())) ? comprobanteVal : undefined;
 
-        const reciboVal = String(row[reciboCol] || '').trim();
-        const nroReciboCaja = (reciboVal && reciboVal !== 'Ninguno') ? reciboVal : null;
+        const reciboVal = reciboCol >= 0 ? String(row[reciboCol] || '').trim() : '';
+        const nroReciboCaja = (reciboVal && !['ninguno', 'null', 'n/a', 'na', '-', '--'].includes(reciboVal.toLowerCase())) ? reciboVal : null;
 
-        const oficinaVal = String(row[oficinaCol] || '').trim();
-        const oficina = (oficinaVal && oficinaVal !== 'Ninguno') ? oficinaVal : undefined;
+        const oficinaVal = oficinaCol >= 0 ? String(row[oficinaCol] || '').trim() : '';
+        const oficina = (oficinaVal && !['ninguno', 'null', 'n/a', 'na'].includes(oficinaVal.toLowerCase())) ? oficinaVal : undefined;
 
-        const asesorVal = String(row[asesorCol] || '').trim();
-        const asesor = (asesorVal && asesorVal !== 'Ninguno') ? asesorVal : null;
+        const asesorVal = asesorCol >= 0 ? String(row[asesorCol] || '').trim() : '';
+        const asesor = (asesorVal && !['ninguno', 'null', 'n/a', 'na'].includes(asesorVal.toLowerCase())) ? asesorVal : null;
 
-        const tipoDocVal = String(row[tipoDocCol] || '').trim();
-        const tipoDocumento = (tipoDocVal && tipoDocVal !== 'Ninguno') ? tipoDocVal as any : null;
+        const tipoDocVal = tipoDocCol >= 0 ? String(row[tipoDocCol] || '').trim() : '';
+        const tipoDocumento = (tipoDocVal && !['ninguno', 'null', 'n/a', 'na'].includes(tipoDocVal.toLowerCase())) ? tipoDocVal as any : null;
 
-        const auxiliarVal = String(row[auxiliarCol] || '').trim();
-        const usuarioIdentificacion = (auxiliarVal && auxiliarVal !== 'Ninguno') ? auxiliarVal : null;
+        const auxiliarVal = auxiliarCol >= 0 ? String(row[auxiliarCol] || '').trim() : '';
+        const usuarioIdentificacion = (auxiliarVal && !['ninguno', 'null', 'n/a', 'na'].includes(auxiliarVal.toLowerCase())) ? auxiliarVal : null;
 
-        const fechaValVal = String(row[fechaValCol] || '').trim();
-        const fechaIdentificacion = (fechaValVal && fechaValVal !== 'Ninguno') ? fechaValVal : null;
+        const fechaValVal = fechaValCol >= 0 ? String(row[fechaValCol] || '').trim() : '';
+        const fechaIdentificacion = (fechaValVal && !['ninguno', 'null', 'n/a', 'na'].includes(fechaValVal.toLowerCase())) ? fechaValVal : null;
+
+        const identificada = ['CONCILIADO', 'IDENTIFICADA', 'IDENTIFICADO', 'S', 'SI', 'SÍ', 'TRUE', '1'].includes(estadoStr) || 
+          !!usuarioIdentificacion || !!fechaIdentificacion || !!nroReciboCaja;
+
+        // Extract Llave Unica or generate deterministic key
+        let llave = llaveCol >= 0 ? String(row[llaveCol] || '').trim() : '';
+        if (!llave || llave.toLowerCase().includes('llave') || ['ninguno', 'null', 'n/a', 'na'].includes(llave.toLowerCase())) {
+          const signature = `${cuenta}_${fechaStr}_${valor}_${desc}_${comprobante || ''}_${horaStr}`;
+          const occurIdx = occurrenceCounts[signature] || 0;
+          occurrenceCounts[signature] = occurIdx + 1;
+          llave = generarLlaveUnica(cuenta, fechaStr, horaStr, valor, desc, comprobante, occurIdx);
+        }
 
         list.push({
           id: llave,
@@ -528,35 +625,14 @@ export function parseExcelBankFile(
           comprobante,
           oficina,
           fechaCarga: currentTimestamp,
-          esHistorico: false
+          esHistorico: false,
+          esQR: esPagoQR(desc)
         });
       }
       continue;
     }
 
     // --- STANDARD BANK MOVEMENTS SHEET PARSING ---
-
-    // Check if the sheet name itself identifies a Sede
-    const sheetNameSede = detectarSede(sheetName);
-
-    // Search top metadata rows (rows 0..15) for any account number / Sede header
-    let sheetMetadataSede: Sede = 'Desconocida';
-    let sheetMetadataCuenta: string = '';
-
-    for (let r = 0; r < Math.min(15, rawRows.length); r++) {
-      const row = rawRows[r];
-      if (!row) continue;
-      for (const cell of row) {
-        if (cell !== undefined && cell !== null) {
-          const cellStr = String(cell);
-          const detected = detectarSede(cellStr);
-          if (detected !== 'Desconocida' && sheetMetadataSede === 'Desconocida') {
-            sheetMetadataSede = detected;
-            sheetMetadataCuenta = cellStr.trim();
-          }
-        }
-      }
-    }
 
     // Search for a table header row (rows 0..35)
     let headerRowIdx = -1;
@@ -686,108 +762,98 @@ export function parseExcelBankFile(
 
       if (isNaN(valor) || valor <= 0) continue;
 
-      // Parse Date & Time
-      const fecha = parseExcelDate(row[fechaColIdx]);
-      let hora = '';
-      if (horaColIdx !== -1 && row[horaColIdx] !== undefined && row[horaColIdx] !== null) {
-        hora = parseExcelTime(row[horaColIdx]);
-        if (hora === '12:00:00') hora = '';
-      }
-      if (!hora) {
-        const extracted = extractExcelTime(row[fechaColIdx]);
-        if (extracted && extracted !== '12:00:00') hora = extracted;
+      // Extract and normalize Description & Oficina
+      let descRaw = descColIdx !== -1 ? String(row[descColIdx] || '').trim() : '';
+      let oficinaRaw = oficinaColIdx !== -1 ? String(row[oficinaColIdx] || '').trim() : '';
+
+      // If description contains "PAGO", ensure it's not discarded
+      if (descRaw.toUpperCase() === 'PAGO' || descRaw.toUpperCase().startsWith('PAGO ')) {
+        // Valid payment description
       }
 
-      // Parse Account
-      let cuenta = String(row[cuentaColIdx] || '').trim();
+      if (descRaw.length <= 3 && oficinaRaw.length > 3) {
+        // Swap if desc was placed in oficina column
+        const temp = descRaw;
+        descRaw = oficinaRaw;
+        oficinaRaw = temp;
+      }
 
-      // Determine Sede
-      let sede = detectarSede(cuenta);
+      const desc = descRaw.toUpperCase() || 'TRANSFERENCIA BANCARIA';
+      const oficina = (oficinaRaw && oficinaRaw !== '• -' && oficinaRaw !== '-') ? oficinaRaw : undefined;
 
-      // Row scan fallback if account column is unspecified or unknown
-      if (sede === 'Desconocida') {
-        for (let i = 0; i < row.length; i++) {
-          if (row[i] !== undefined && row[i] !== null && i !== valorColIdx && i !== fechaColIdx) {
-            const cellSede = detectarSede(String(row[i]));
-            if (cellSede !== 'Desconocida') {
-              sede = cellSede;
-              cuenta = String(row[i]).trim();
-              break;
-            }
-          }
+      // Filter irrelevant rows (tax withholdings, fees, summary lines)
+      if (esMovimientoIrrelevante(valor, desc, oficina)) continue;
+
+      // Extract Date and Time
+      const fechaStr = parseExcelDate(row[fechaColIdx]);
+      let horaStr = horaColIdx !== -1 ? parseExcelTime(row[horaColIdx]) : '';
+      if (!horaStr) {
+        const rawDateStr = String(row[fechaColIdx] || '');
+        const timeMatch = rawDateStr.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+        if (timeMatch) {
+          horaStr = timeMatch[1];
         }
       }
 
-      // Metadata / Sheet name fallback
+      // Extract Account and Sede
+      let cuentaRaw = cuentaColIdx !== -1 ? String(row[cuentaColIdx] || '').trim() : '';
+      if (!cuentaRaw) {
+        cuentaRaw = sheetMetadataCuenta || (fallbackSede === 'Guayabal' ? '101-574965-19' : fallbackSede === 'Sabaneta' ? '101-724709-16' : fallbackSede === 'Naranjal' ? '101-724768-07' : '');
+      }
+
+      let sede: Sede = 'Desconocida';
+      if (cuentaRaw) {
+        sede = detectarSede(cuentaRaw);
+      }
       if (sede === 'Desconocida') {
-        if (sheetNameSede !== 'Desconocida') {
-          sede = sheetNameSede;
-          cuenta = cuenta || sheetName;
-        } else if (sheetMetadataSede !== 'Desconocida') {
-          sede = sheetMetadataSede;
-          cuenta = cuenta || sheetMetadataCuenta;
-        } else if (fallbackSede !== 'Desconocida') {
-          sede = fallbackSede;
-          cuenta = fallbackSede === 'Guayabal' ? '...6519' : fallbackSede === 'Sabaneta' ? '...0916' : '...6807';
-        } else {
-          sede = 'Desconocida';
-          cuenta = cuenta || 'CODI_TRANS';
-        }
+        sede = sheetMetadataSede !== 'Desconocida' ? sheetMetadataSede : 
+               sheetNameSede !== 'Desconocida' ? sheetNameSede : 
+               fallbackSede;
       }
 
-      // Parse Description & Oficina
-      let desc = String(row[descColIdx] || 'TRANSFERENCIA BANCARIA').trim();
-      let oficina = String(row[oficinaColIdx] || '').trim();
-      let rawComprobante = String(row[comprobanteColIdx] || '').trim();
-
-      // If description and office are flipped or split across columns
-      const descLower = desc.toLowerCase();
-      const ofiLower = oficina.toLowerCase();
-      if (
-        (ofiLower.includes('pago') || ofiLower.includes('abono') || ofiLower.includes('transferencia') || ofiLower.includes('consignacion') || ofiLower.includes('qr') || ofiLower.includes('compra')) &&
-        !descLower.includes('pago') && !descLower.includes('abono') && !descLower.includes('transferencia') && !descLower.includes('consignacion')
-      ) {
-        // Swap so description has the transaction concept
-        const temp = desc;
-        desc = oficina;
-        oficina = temp;
+      // Extract Comprobante / Referencia
+      let comprobanteRaw = comprobanteColIdx !== -1 ? String(row[comprobanteColIdx] || '').trim() : '';
+      if (comprobanteRaw === '• -' || comprobanteRaw === '-' || comprobanteRaw.toLowerCase() === 'null') {
+        comprobanteRaw = '';
       }
+      const comprobante = comprobanteRaw || undefined;
 
-      // Sanitize dummy comprobantes like "• -", "-", "--", "- -", "N/A"
-      let comprobante: string | undefined = undefined;
-      const cleanComp = rawComprobante.replace(/[•\s\-_]/g, '').trim();
-      if (cleanComp && cleanComp.toLowerCase() !== 'na' && cleanComp.toLowerCase() !== 'null' && cleanComp.toLowerCase() !== 'ninguno') {
-        comprobante = rawComprobante;
-      }
+      // Signature for duplicate occurrence index within this batch
+      const rowSignature = `${cuentaRaw}_${fechaStr}_${valor}_${desc}_${comprobante || ''}_${horaStr}`;
+      const occurrenceIndex = occurrenceCounts[rowSignature] || 0;
+      occurrenceCounts[rowSignature] = occurrenceIndex + 1;
 
-      // Discard tax, fee, commission, or irrelevant movements
-      if (esMovimientoIrrelevante(valor, desc, oficina)) {
-        continue;
-      }
-
-      // Generate stable unique signature
-      const sig = `${cuenta}_${fecha}_${valor}_${desc.toUpperCase()}_${comprobante}_${hora}`;
-      const ocurr_idx = occurrenceCounts[sig] || 0;
-      occurrenceCounts[sig] = ocurr_idx + 1;
-
-      const llave = generarLlaveUnica(cuenta, fecha, hora, valor, desc, comprobante, ocurr_idx);
-      const esQRInstance = esPagoQR(desc);
+      // Generate deterministic unique key
+      const llave = generarLlaveUnica(
+        cuentaRaw,
+        fechaStr,
+        horaStr,
+        valor,
+        desc,
+        comprobante,
+        occurrenceIndex
+      );
 
       list.push({
         id: llave,
         llaveUnica: llave,
-        fecha,
-        hora,
-        descripcion: desc.toUpperCase(),
+        fecha: fechaStr,
+        hora: horaStr,
+        descripcion: desc,
         valor,
-        cuenta,
+        cuenta: cuentaRaw,
         sede,
         identificada: false,
+        fechaIdentificacion: null,
+        usuarioIdentificacion: null,
+        asesor: null,
+        tipoDocumento: null,
+        nroReciboCaja: null,
+        comprobante,
+        oficina,
         fechaCarga: currentTimestamp,
         esHistorico: false,
-        oficina: oficina || undefined,
-        comprobante: comprobante || undefined,
-        esQR: esQRInstance
+        esQR: esPagoQR(desc)
       });
     }
   }
@@ -796,8 +862,8 @@ export function parseExcelBankFile(
 }
 
 /**
-  * Parses Cash Closures (Cierres de Caja) from an exported report workbook or excel sheet
-  */
+ * Parses Cash Closures (Cierres de Caja) from an exported report workbook or excel sheet
+ */
 export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
   try {
     const data = new Uint8Array(arrayBuffer);
@@ -814,11 +880,17 @@ export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
     if (rawRows.length < 2) return [];
 
     let headerIdx = -1;
-    for (let r = 0; r < Math.min(5, rawRows.length); r++) {
+    for (let r = 0; r < Math.min(20, rawRows.length); r++) {
       const row = rawRows[r];
       if (row && row.some(cell => {
         const str = String(cell || '').toLowerCase();
-        return str.includes('sede') || str.includes('cierre') || str.includes('declarado');
+        return (
+          str.includes('sede') || 
+          str.includes('cierre') || 
+          str.includes('declarado') ||
+          str.includes('cajera') ||
+          str.includes('identificado')
+        );
       })) {
         headerIdx = r;
         break;
@@ -840,16 +912,24 @@ export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
     });
     const totalIdentCol = header.findIndex((c: any) => {
       const str = String(c || '').toLowerCase();
-      return str.includes('total identificado') || str.includes('declarado') || str.includes('valor identificado');
+      return str.includes('total identificado') || str.includes('declarado') || str.includes('valor identificado') || str.includes('valor total identificado');
     });
     const totalAplicativoCol = header.findIndex((c: any) => {
       const str = String(c || '').toLowerCase();
-      return str.includes('aplicativo') || str.includes('banco') || str.includes('total banco');
+      return str.includes('aplicativo') || str.includes('banco') || str.includes('total banco') || str.includes('total aplicativo') || str.includes('valor total aplicativo');
     });
     const coincideCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('coincide'));
     const motivoCol = header.findIndex((c: any) => {
       const str = String(c || '').toLowerCase();
-      return str.includes('motivo') || str.includes('observaci') || str.includes('diferencia');
+      return str.includes('motivo') || str.includes('observaci') || str.includes('diferencia') || str.includes('descuadre');
+    });
+    const solicitaDesbloqueoCol = header.findIndex((c: any) => {
+      const str = String(c || '').toLowerCase();
+      return str.includes('solicitó desbloqueo') || str.includes('solicito desbloqueo') || str.includes('desbloqueo');
+    });
+    const motivoDesbloqueoCol = header.findIndex((c: any) => {
+      const str = String(c || '').toLowerCase();
+      return str.includes('motivo desbloqueo');
     });
 
     const cierres: CierreCaja[] = [];
@@ -858,13 +938,13 @@ export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
       const row = rawRows[r];
       if (!row || row.length < 2) continue;
 
-      const rawSede = String(row[sedeCol] || '').trim();
+      const rawSede = sedeCol >= 0 ? String(row[sedeCol] || '').trim() : '';
       const sede = detectarSede(rawSede) !== 'Desconocida' ? detectarSede(rawSede) : ((rawSede || 'Guayabal') as Sede);
       
-      const fecha = parseExcelDate(row[fechaCol]);
+      const fecha = fechaCol >= 0 ? parseExcelDate(row[fechaCol]) : '';
       if (!fecha) continue;
 
-      const nombreCajera = String(row[cajeraCol] || 'Cajera Importada').trim();
+      const nombreCajera = cajeraCol >= 0 ? String(row[cajeraCol] || 'Cajera Importada').trim() : 'Cajera Importada';
       const numeroIdentificados = numIdentCol >= 0 ? parseInt(String(row[numIdentCol] || '0'), 10) : 0;
       const totalIdentificado = totalIdentCol >= 0 ? parseColombianNumber(row[totalIdentCol]) || 0 : 0;
       const totalAplicativo = totalAplicativoCol >= 0 ? parseColombianNumber(row[totalAplicativoCol]) || 0 : 0;
@@ -873,6 +953,8 @@ export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
       const coincide = coincideStr === 'SÍ' || coincideStr === 'SI' || coincideStr === 'TRUE' || coincideStr === 'CONCILIADO';
 
       const motivoDiferencia = motivoCol >= 0 ? String(row[motivoCol] || '').trim() : '';
+      const solicitaDesbloqueo = solicitaDesbloqueoCol >= 0 ? ['SÍ', 'SI', 'TRUE', '1', 'S'].includes(String(row[solicitaDesbloqueoCol] || '').trim().toUpperCase()) : false;
+      const motivoDesbloqueo = motivoDesbloqueoCol >= 0 ? String(row[motivoDesbloqueoCol] || '').trim() : undefined;
 
       const id = `cierre_${sede}_${fecha}`;
       cierres.push({
@@ -888,7 +970,9 @@ export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
         diferencia: totalIdentificado - totalAplicativo,
         totalDeclarado: totalIdentificado,
         fechaCreacion: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        bloqueado: true
+        bloqueado: true,
+        solicitaDesbloqueo: solicitaDesbloqueo || undefined,
+        motivoDesbloqueo: motivoDesbloqueo || undefined
       });
     }
 
