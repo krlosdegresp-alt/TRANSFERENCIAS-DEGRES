@@ -38,7 +38,8 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
   const [targetSede, setTargetSede] = useState<Sede>('Desconocida');
   const [parsedQueue, setParsedQueue] = useState<Transaction[]>([]);
   const [parsedCierres, setParsedCierres] = useState<CierreCaja[]>([]);
-  const [uploadSummary, setUploadSummary] = useState<{ imported: number; duplicates: number } | null>(null);
+  const [activePreviewTab, setActivePreviewTab] = useState<'transacciones' | 'cierres'>('transacciones');
+  const [uploadSummary, setUploadSummary] = useState<{ imported: number; duplicates: number; cierres?: number } | null>(null);
   const [batches, setBatches] = useState<UploadBatch[]>(getUploadBatches());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -187,6 +188,11 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
         setSelectedFile(file);
         setParsedQueue(list);
         setParsedCierres(cierres);
+        if (list.length === 0 && cierres.length > 0) {
+          setActivePreviewTab('cierres');
+        } else {
+          setActivePreviewTab('transacciones');
+        }
       } else {
         const buffer = await file.arrayBuffer();
         setSelectedFile(file);
@@ -196,6 +202,11 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
 
         setParsedQueue(list);
         setParsedCierres(cierres);
+        if (list.length === 0 && cierres.length > 0) {
+          setActivePreviewTab('cierres');
+        } else {
+          setActivePreviewTab('transacciones');
+        }
       }
     } catch (err: any) {
       console.error('Error parsing spreadsheet file', err);
@@ -225,19 +236,35 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
         cierresImportadosCount = importarCierresCajaBulk(parsedCierres);
       }
 
-      setUploadSummary(res);
+      setUploadSummary({ ...res, cierres: cierresImportadosCount });
       setParsedQueue([]);
       setParsedCierres([]);
       setSelectedFile(null);
       setBatches(getUploadBatches()); // Update local file upload history
       onRefreshData();
 
-      if (cierresImportadosCount > 0) {
-        triggerAlert('Cierres Importados', `¡Se importaron exitosamente ${cierresImportadosCount} registros de Cierre de Caja seleccionados desde el archivo!`, 'success');
+      if (cierresImportadosCount > 0 && res.imported > 0) {
+        triggerAlert(
+          'Carga Completa', 
+          `¡Éxito! Se importaron ${res.imported} movimientos bancarios (${res.duplicates} duplicados omitidos) y se registraron y bloquearon ${cierresImportadosCount} cierres de caja.`, 
+          'success'
+        );
+      } else if (cierresImportadosCount > 0) {
+        triggerAlert(
+          'Cierres de Caja Bloqueados', 
+          `¡Éxito! Se importaron y bloquearon ${cierresImportadosCount} cierres de caja desde el archivo.`, 
+          'success'
+        );
+      } else if (res.imported > 0 || res.duplicates > 0) {
+        triggerAlert(
+          'Carga Completa', 
+          `¡Éxito! Se importaron ${res.imported} transacciones a la base de datos (${res.duplicates} duplicados omitidos).`, 
+          'success'
+        );
       }
-    } catch (err) {
-      console.error(err);
-      triggerAlert('Error', 'No se pudieron registrar los datos en la base de datos de Firestore.', 'error');
+    } catch (err: any) {
+      console.error("Error committing upload queue:", err);
+      triggerAlert('Error', `No se pudieron registrar los datos: ${err?.message || 'Error en base de datos'}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -267,6 +294,7 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
 
   const handleClearQueue = () => {
     setParsedQueue([]);
+    setParsedCierres([]);
     setSelectedFile(null);
   };
 
@@ -319,7 +347,7 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
           <div className="flex-1">
             <h4 className="font-black text-emerald-900 text-sm uppercase tracking-wider font-space">¡Archivo Procesado e Ingerido Correctamente!</h4>
             <p className="text-emerald-700 text-xs mt-1">
-              La base de datos de transferencias en tiempo real de Firestore se actualizó con los siguientes resultados:
+              La base de datos de transferencias y cierres de caja en tiempo real de Firestore se actualizó con los siguientes resultados:
             </p>
             <div className="mt-4 flex flex-wrap gap-4 text-xs font-bold uppercase tracking-wider font-space">
               <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded">
@@ -328,9 +356,14 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
               <span className={`px-3 py-1 rounded ${uploadSummary.duplicates > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'}`}>
                 ⚠ {uploadSummary.duplicates} Duplicados detectados y omitidos
               </span>
+              {uploadSummary.cierres !== undefined && uploadSummary.cierres > 0 && (
+                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded">
+                  🔒 {uploadSummary.cierres} Cierres de caja registrados y bloqueados
+                </span>
+              )}
             </div>
             <p className="text-slate-500 text-[10px] mt-2.5 font-mono uppercase">
-              * El sistema genera una llave única combinando (cuenta+fecha+hora+valor+descripción) previniendo cualquier duplicación involuntaria.
+              * El sistema genera llaves únicas previniendo cualquier duplicación involuntaria.
             </p>
           </div>
         </div>
@@ -422,22 +455,55 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
         <div className="lg:col-span-7">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[400px] flex flex-col justify-between">
             <div>
-              <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-slate-900 text-sm">Vista Previa de Registros a Guardar</h3>
-                  <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                    {parsedQueue.length} Registros parsed
-                  </span>
+                  <h3 className="font-bold text-slate-900 text-sm">Vista Previa de Registros</h3>
+                  {parsedQueue.length > 0 && (
+                    <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      {parsedQueue.length} Transacciones
+                    </span>
+                  )}
+                  {parsedCierres.length > 0 && (
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      🔒 {parsedCierres.length} Cierres Bloqueados
+                    </span>
+                  )}
                 </div>
-                {parsedQueue.length > 0 && (
-                  <button
-                    id="btn-clear-queue-preview"
-                    onClick={handleClearQueue}
-                    className="text-xs text-rose-600 hover:text-rose-800 font-semibold"
-                  >
-                    Descartar Todo
-                  </button>
-                )}
+
+                <div className="flex items-center gap-2">
+                  {parsedQueue.length > 0 && parsedCierres.length > 0 && (
+                    <div className="flex bg-slate-200 p-0.5 rounded-lg text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setActivePreviewTab('transacciones')}
+                        className={`px-2 py-1 rounded-md transition-colors ${
+                          activePreviewTab === 'transacciones' ? 'bg-white text-[#1A2D7C] shadow-xs' : 'text-slate-600'
+                        }`}
+                      >
+                        Transacciones ({parsedQueue.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActivePreviewTab('cierres')}
+                        className={`px-2 py-1 rounded-md transition-colors ${
+                          activePreviewTab === 'cierres' ? 'bg-white text-[#1A2D7C] shadow-xs' : 'text-slate-600'
+                        }`}
+                      >
+                        Cierres ({parsedCierres.length})
+                      </button>
+                    </div>
+                  )}
+
+                  {(parsedQueue.length > 0 || parsedCierres.length > 0) && (
+                    <button
+                      id="btn-clear-queue-preview"
+                      onClick={handleClearQueue}
+                      className="text-xs text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
+                    >
+                      Descartar Todo
+                    </button>
+                  )}
+                </div>
               </div>
 
               {loading ? (
@@ -445,13 +511,61 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
                   <Loader2 className="h-8 w-8 text-[#1A2D7C] animate-spin" />
                   <p className="text-xs font-semibold text-slate-500">Analizando el archivo de movimientos del banco...</p>
                 </div>
-              ) : parsedQueue.length === 0 ? (
+              ) : parsedQueue.length === 0 && parsedCierres.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-16 text-center text-slate-400">
                   <FileSpreadsheet className="h-10 w-10 text-slate-300 mb-3" />
                   <p className="text-xs font-semibold">No hay ningún archivo cargado en cola</p>
                   <p className="text-[11px] text-slate-400 mt-1 max-w-xs leading-relaxed">
-                    Usa el panel de la izquierda para arrastrar o examinar el archivo de extracto de la cuenta de ahorros empresarial de Bancolombia.
+                    Usa el panel de la izquierda para arrastrar o examinar el archivo de extracto bancario o respaldo de Excel.
                   </p>
+                </div>
+              ) : activePreviewTab === 'cierres' || (parsedQueue.length === 0 && parsedCierres.length > 0) ? (
+                <div className="overflow-x-auto max-h-[360px]">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-100 text-slate-600 uppercase font-bold text-[9px] border-b border-slate-200 sticky top-0">
+                      <tr>
+                        <th className="p-3">Sede</th>
+                        <th className="p-3">Fecha de Cierre</th>
+                        <th className="p-3">Cajera / Usuario</th>
+                        <th className="p-3 text-right">Total Identificado</th>
+                        <th className="p-3 text-right">Total Aplicativo</th>
+                        <th className="p-3 text-center">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {parsedCierres.map((c, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-3 font-semibold">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              c.sede === 'Guayabal' ? 'bg-indigo-50 text-indigo-700' :
+                              c.sede === 'Sabaneta' ? 'bg-orange-50 text-orange-700' :
+                              c.sede === 'Naranjal' ? 'bg-teal-50 text-teal-700' :
+                              'bg-slate-100 text-slate-700'
+                            }`}>
+                              {c.sede}
+                            </span>
+                          </td>
+                          <td className="p-3 text-slate-700 font-mono font-bold">
+                            {formatDateHuman(c.fecha)}
+                          </td>
+                          <td className="p-3 text-slate-600 font-medium">
+                            {c.nombreCajera}
+                          </td>
+                          <td className="p-3 text-right font-bold text-slate-900 font-mono">
+                            {formatCOP(c.totalIdentificado)}
+                          </td>
+                          <td className="p-3 text-right font-bold text-slate-700 font-mono">
+                            {formatCOP(c.totalAplicativo)}
+                          </td>
+                          <td className="p-3 text-center">
+                            <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-0.5 rounded-full border border-emerald-300">
+                              🔒 BLOQUEADO
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               ) : (
                 <div className="overflow-x-auto max-h-[360px]">
@@ -499,11 +613,16 @@ export default function Carga({ currentUser, onRefreshData }: CargaProps) {
               )}
             </div>
 
-            {parsedQueue.length > 0 && (
+            {(parsedQueue.length > 0 || parsedCierres.length > 0) && (
               <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-[10px] text-slate-500 font-semibold">
                   <Info className="h-3.5 w-3.5 text-[#1A2D7C]" />
-                  <span>Se filtrarán duplicados e impuestos antes de insertar.</span>
+                  <span>
+                    {parsedCierres.length > 0 
+                      ? `Se insertarán movimientos y se bloquearán ${parsedCierres.length} días de cierre de caja.`
+                      : 'Se filtrarán duplicados e impuestos antes de insertar.'
+                    }
+                  </span>
                 </div>
                 <button
                   id="btn-commit-to-firestore"

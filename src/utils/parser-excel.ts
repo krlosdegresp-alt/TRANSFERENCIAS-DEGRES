@@ -868,112 +868,240 @@ export function parseExcelCierres(arrayBuffer: ArrayBuffer): CierreCaja[] {
   try {
     const data = new Uint8Array(arrayBuffer);
     const workbook = XLSX.read(data, { type: 'array' });
-    const targetSheetName = workbook.SheetNames.find(n => 
-      n.toLowerCase().includes('cierre') || 
-      n.toLowerCase().includes('cierres')
-    );
-
-    if (!targetSheetName) return [];
-
-    const worksheet = workbook.Sheets[targetSheetName];
-    const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
-    if (rawRows.length < 2) return [];
-
-    let headerIdx = -1;
-    for (let r = 0; r < Math.min(20, rawRows.length); r++) {
-      const row = rawRows[r];
-      if (row && row.some(cell => {
-        const str = String(cell || '').toLowerCase();
-        return (
-          str.includes('sede') || 
-          str.includes('cierre') || 
-          str.includes('declarado') ||
-          str.includes('cajera') ||
-          str.includes('identificado')
-        );
-      })) {
-        headerIdx = r;
-        break;
-      }
-    }
-
-    if (headerIdx === -1) return [];
-
-    const header = rawRows[headerIdx];
-    const sedeCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('sede'));
-    const fechaCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('fecha'));
-    const cajeraCol = header.findIndex((c: any) => {
-      const str = String(c || '').toLowerCase();
-      return str.includes('cajera') || str.includes('nombre') || str.includes('usuario');
-    });
-    const numIdentCol = header.findIndex((c: any) => {
-      const str = String(c || '').toLowerCase();
-      return str.includes('identificado') || str.includes('n°') || str.includes('numero') || str.includes('transacciones');
-    });
-    const totalIdentCol = header.findIndex((c: any) => {
-      const str = String(c || '').toLowerCase();
-      return str.includes('total identificado') || str.includes('declarado') || str.includes('valor identificado') || str.includes('valor total identificado');
-    });
-    const totalAplicativoCol = header.findIndex((c: any) => {
-      const str = String(c || '').toLowerCase();
-      return str.includes('aplicativo') || str.includes('banco') || str.includes('total banco') || str.includes('total aplicativo') || str.includes('valor total aplicativo');
-    });
-    const coincideCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('coincide'));
-    const motivoCol = header.findIndex((c: any) => {
-      const str = String(c || '').toLowerCase();
-      return str.includes('motivo') || str.includes('observaci') || str.includes('diferencia') || str.includes('descuadre');
-    });
-    const solicitaDesbloqueoCol = header.findIndex((c: any) => {
-      const str = String(c || '').toLowerCase();
-      return str.includes('solicitó desbloqueo') || str.includes('solicito desbloqueo') || str.includes('desbloqueo');
-    });
-    const motivoDesbloqueoCol = header.findIndex((c: any) => {
-      const str = String(c || '').toLowerCase();
-      return str.includes('motivo desbloqueo');
+    
+    // Check if there is an explicit closures sheet
+    const targetSheetName = workbook.SheetNames.find(n => {
+      const lower = n.toLowerCase().trim();
+      return lower.includes('cierre') || lower.includes('cierres') || lower.includes('cuadre') || lower.includes('caja');
     });
 
     const cierres: CierreCaja[] = [];
 
-    for (let r = headerIdx + 1; r < rawRows.length; r++) {
-      const row = rawRows[r];
-      if (!row || row.length < 2) continue;
+    if (targetSheetName) {
+      const worksheet = workbook.Sheets[targetSheetName];
+      const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+      if (rawRows.length >= 2) {
+        let headerIdx = -1;
+        for (let r = 0; r < Math.min(20, rawRows.length); r++) {
+          const row = rawRows[r];
+          if (row && row.some(cell => {
+            const str = String(cell || '').toLowerCase();
+            return (
+              str.includes('sede') || 
+              str.includes('cierre') || 
+              str.includes('declarado') ||
+              str.includes('cajera') ||
+              str.includes('identificado') ||
+              str.includes('bloqueado')
+            );
+          })) {
+            headerIdx = r;
+            break;
+          }
+        }
 
-      const rawSede = sedeCol >= 0 ? String(row[sedeCol] || '').trim() : '';
-      const sede = detectarSede(rawSede) !== 'Desconocida' ? detectarSede(rawSede) : ((rawSede || 'Guayabal') as Sede);
-      
-      const fecha = fechaCol >= 0 ? parseExcelDate(row[fechaCol]) : '';
-      if (!fecha) continue;
+        if (headerIdx !== -1) {
+          const header = rawRows[headerIdx];
+          const sedeCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('sede'));
+          const fechaCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('fecha'));
+          const cajeraCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('cajera') || str.includes('nombre') || str.includes('usuario');
+          });
+          const numIdentCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('identificado') || str.includes('n°') || str.includes('numero') || str.includes('transacciones');
+          });
+          const totalIdentCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('total identificado') || str.includes('declarado') || str.includes('valor identificado') || str.includes('valor total identificado');
+          });
+          const totalAplicativoCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('aplicativo') || str.includes('banco') || str.includes('total banco') || str.includes('total aplicativo') || str.includes('valor total aplicativo');
+          });
+          const coincideCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('coincide'));
+          const motivoCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('motivo') || str.includes('observaci') || str.includes('diferencia') || str.includes('descuadre');
+          });
+          const estadoCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('estado');
+          });
+          const solicitaDesbloqueoCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('solicitó desbloqueo') || str.includes('solicito desbloqueo') || str.includes('desbloqueo');
+          });
+          const motivoDesbloqueoCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('motivo desbloqueo');
+          });
 
-      const nombreCajera = cajeraCol >= 0 ? String(row[cajeraCol] || 'Cajera Importada').trim() : 'Cajera Importada';
-      const numeroIdentificados = numIdentCol >= 0 ? parseInt(String(row[numIdentCol] || '0'), 10) : 0;
-      const totalIdentificado = totalIdentCol >= 0 ? parseColombianNumber(row[totalIdentCol]) || 0 : 0;
-      const totalAplicativo = totalAplicativoCol >= 0 ? parseColombianNumber(row[totalAplicativoCol]) || 0 : 0;
+          for (let r = headerIdx + 1; r < rawRows.length; r++) {
+            const row = rawRows[r];
+            if (!row || row.length < 2) continue;
 
-      const coincideStr = coincideCol >= 0 ? String(row[coincideCol] || '').trim().toUpperCase() : 'SÍ';
-      const coincide = coincideStr === 'SÍ' || coincideStr === 'SI' || coincideStr === 'TRUE' || coincideStr === 'CONCILIADO';
+            const rawSede = sedeCol >= 0 ? String(row[sedeCol] || '').trim() : '';
+            const sede = detectarSede(rawSede) !== 'Desconocida' ? detectarSede(rawSede) : ((rawSede || 'Guayabal') as Sede);
+            
+            const fecha = fechaCol >= 0 ? parseExcelDate(row[fechaCol]) : '';
+            if (!fecha) continue;
 
-      const motivoDiferencia = motivoCol >= 0 ? String(row[motivoCol] || '').trim() : '';
-      const solicitaDesbloqueo = solicitaDesbloqueoCol >= 0 ? ['SÍ', 'SI', 'TRUE', '1', 'S'].includes(String(row[solicitaDesbloqueoCol] || '').trim().toUpperCase()) : false;
-      const motivoDesbloqueo = motivoDesbloqueoCol >= 0 ? String(row[motivoDesbloqueoCol] || '').trim() : undefined;
+            const nombreCajera = cajeraCol >= 0 ? String(row[cajeraCol] || 'Cajera').trim() : 'Cajera';
+            const numeroIdentificados = numIdentCol >= 0 ? parseInt(String(row[numIdentCol] || '0'), 10) : 0;
+            const totalIdentificado = totalIdentCol >= 0 ? parseColombianNumber(row[totalIdentCol]) || 0 : 0;
+            const totalAplicativo = totalAplicativoCol >= 0 ? parseColombianNumber(row[totalAplicativoCol]) || 0 : 0;
 
-      const id = `cierre_${sede}_${fecha}`;
-      cierres.push({
-        id,
-        fecha,
-        sede,
-        nombreCajera,
-        numeroIdentificados,
-        totalIdentificado,
-        totalAplicativo,
-        coincide,
-        motivoDiferencia: coincide ? null : (motivoDiferencia || null),
-        diferencia: totalIdentificado - totalAplicativo,
-        totalDeclarado: totalIdentificado,
-        fechaCreacion: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        bloqueado: true,
-        solicitaDesbloqueo: solicitaDesbloqueo || undefined,
-        motivoDesbloqueo: motivoDesbloqueo || undefined
-      });
+            const coincideStr = coincideCol >= 0 ? String(row[coincideCol] || '').trim().toUpperCase() : 'SÍ';
+            const coincide = coincideStr === 'SÍ' || coincideStr === 'SI' || coincideStr === 'TRUE' || coincideStr === 'CONCILIADO' || totalIdentificado === totalAplicativo;
+
+            const motivoDiferencia = motivoCol >= 0 ? String(row[motivoCol] || '').trim() : '';
+            const estadoStr = estadoCol >= 0 ? String(row[estadoCol] || '').trim().toUpperCase() : '';
+            const isBloqueado = !estadoStr.includes('DESBLOQUEADO'); // Default to true
+
+            const solicitaDesbloqueo = solicitaDesbloqueoCol >= 0 ? ['SÍ', 'SI', 'TRUE', '1', 'S'].includes(String(row[solicitaDesbloqueoCol] || '').trim().toUpperCase()) : false;
+            const motivoDesbloqueo = motivoDesbloqueoCol >= 0 ? (String(row[motivoDesbloqueoCol] || '').trim() || null) : null;
+
+            const id = `cierre_${sede}_${fecha}`;
+            cierres.push({
+              id,
+              fecha,
+              sede,
+              nombreCajera: nombreCajera || 'Cajera',
+              numeroIdentificados,
+              totalIdentificado,
+              totalAplicativo,
+              coincide,
+              motivoDiferencia: coincide ? null : (motivoDiferencia || null),
+              diferencia: totalIdentificado - totalAplicativo,
+              totalDeclarado: totalIdentificado,
+              fechaCreacion: new Date().toISOString().replace('T', ' ').slice(0, 19),
+              bloqueado: isBloqueado,
+              solicitaDesbloqueo: solicitaDesbloqueo || false,
+              motivoDesbloqueo: motivoDesbloqueo || null
+            });
+          }
+        }
+      }
+    }
+
+    // If no explicit closures sheet found or empty, inspect all sheets for rows that have closure metadata (like in Movimientos_Filtrados)
+    if (cierres.length === 0) {
+      for (const sheetName of workbook.SheetNames) {
+        const ws = workbook.Sheets[sheetName];
+        const rawRows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
+        if (rawRows.length < 2) continue;
+
+        let headerIdx = -1;
+        for (let r = 0; r < Math.min(20, rawRows.length); r++) {
+          const row = rawRows[r];
+          if (row && row.some(cell => {
+            const str = String(cell || '').toLowerCase();
+            return str.includes('cierre caja declarado') || str.includes('nombre cajera cierre');
+          })) {
+            headerIdx = r;
+            break;
+          }
+        }
+
+        if (headerIdx !== -1) {
+          const header = rawRows[headerIdx];
+          const sedeCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('sede'));
+          const fechaCol = header.findIndex((c: any) => String(c || '').toLowerCase().includes('fecha'));
+          const cierreDeclCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('cierre caja declarado') || str.includes('cierre declarado');
+          });
+          const cajeraCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('cajera cierre') || str.includes('cajera');
+          });
+          const valorCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('valor') || str.includes('monto') || str.includes('importe');
+          });
+          const estadoCol = header.findIndex((c: any) => {
+            const str = String(c || '').toLowerCase();
+            return str.includes('estado');
+          });
+
+          if (fechaCol >= 0 && cierreDeclCol >= 0) {
+            // Group transactions by fecha + sede
+            const groups: Record<string, { fecha: string; sede: Sede; cajera: string; totalDeclarado: number; identifiedSum: number; bankSum: number; identifiedCount: number }> = {};
+            
+            for (let r = headerIdx + 1; r < rawRows.length; r++) {
+              const row = rawRows[r];
+              if (!row || row.length < 2) continue;
+
+              const fecha = parseExcelDate(row[fechaCol]);
+              if (!fecha) continue;
+
+              const rawSede = sedeCol >= 0 ? String(row[sedeCol] || '').trim() : '';
+              const sede = detectarSede(rawSede) !== 'Desconocida' ? detectarSede(rawSede) : ((rawSede || 'Guayabal') as Sede);
+              
+              const cierreDeclVal = parseColombianNumber(row[cierreDeclCol]);
+              const rawCajera = cajeraCol >= 0 ? String(row[cajeraCol] || '').trim() : '';
+              const val = valorCol >= 0 ? parseColombianNumber(row[valorCol]) || 0 : 0;
+              const estado = estadoCol >= 0 ? String(row[estadoCol] || '').toUpperCase() : '';
+              const isIdentified = estado.includes('CONCILIADO') || estado.includes('IDENTIFICAD') || estado.includes('OK');
+
+              const groupKey = `${sede}_${fecha}`;
+              if (!groups[groupKey]) {
+                groups[groupKey] = {
+                  fecha,
+                  sede,
+                  cajera: (rawCajera && rawCajera !== 'N/A' && !rawCajera.toLowerCase().includes('sin cierre')) ? rawCajera : 'Cajera',
+                  totalDeclarado: cierreDeclVal || 0,
+                  identifiedSum: 0,
+                  bankSum: 0,
+                  identifiedCount: 0
+                };
+              }
+
+              if (cierreDeclVal && cierreDeclVal > 0) {
+                groups[groupKey].totalDeclarado = cierreDeclVal;
+              }
+              if (rawCajera && rawCajera !== 'N/A' && !rawCajera.toLowerCase().includes('sin cierre')) {
+                groups[groupKey].cajera = rawCajera;
+              }
+
+              groups[groupKey].bankSum += val;
+              if (isIdentified) {
+                groups[groupKey].identifiedSum += val;
+                groups[groupKey].identifiedCount += 1;
+              }
+            }
+
+            for (const [key, g] of Object.entries(groups)) {
+              if (g.totalDeclarado > 0 || (g.cajera !== 'Cajera' && g.identifiedSum > 0)) {
+                const totalIdent = g.totalDeclarado > 0 ? g.totalDeclarado : g.identifiedSum;
+                const totalAplic = g.bankSum;
+                const id = `cierre_${g.sede}_${g.fecha}`;
+                if (!cierres.some(c => c.id === id)) {
+                  cierres.push({
+                    id,
+                    fecha: g.fecha,
+                    sede: g.sede,
+                    nombreCajera: g.cajera,
+                    numeroIdentificados: g.identifiedCount,
+                    totalIdentificado: totalIdent,
+                    totalAplicativo: totalAplic,
+                    coincide: totalIdent === totalAplic,
+                    motivoDiferencia: null,
+                    diferencia: totalIdent - totalAplic,
+                    totalDeclarado: totalIdent,
+                    fechaCreacion: new Date().toISOString().replace('T', ' ').slice(0, 19),
+                    bloqueado: true,
+                    solicitaDesbloqueo: false,
+                    motivoDesbloqueo: null
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     return cierres;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Transaction, Sede, User, ReportConfig } from '../types';
+import { Transaction, Sede, User, ReportConfig, CierreCaja } from '../types';
 import { formatCOP, formatDateHuman, getColombiaDateTime, formatDateTime12h, formatTime12h } from '../utils/formato';
 import { 
   getAdvisors, 
@@ -230,15 +230,28 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
   const [motivoDesbloqueoLocal, setMotivoDesbloqueoLocal] = useState('');
   const [mostrarFormSolicitud, setMostrarFormSolicitud] = useState(false);
   const [showIdentifiedListCierre, setShowIdentifiedListCierre] = useState(false);
+  const [activeCierres, setActiveCierres] = useState<CierreCaja[]>(() => getCierresCaja());
 
-  // Fetch all cierres
-  const activeCierres = getCierresCaja();
+  // Keep activeCierres synced reactively
+  useEffect(() => {
+    setActiveCierres(getCierresCaja());
+    const unsubscribe = subscribeToDatabase(() => {
+      setActiveCierres(getCierresCaja());
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    setActiveCierres(getCierresCaja());
+  }, [transactions]);
+
+  // Current closure for selected date & sede
   const currentCierre = activeCierres.find(c => c.fecha === cierreFecha && c.sede === cierreSede);
-  const isAlreadyClosed = !!currentCierre;
+  const isAlreadyClosed = !!currentCierre && currentCierre.bloqueado !== false;
 
   // Let's calculate:
   // 1. Total Bancos for selected closure date & branch
-  const totalBancoCierre = transactions.filter(
+  const rawBancoCierre = transactions.filter(
     t => t.fecha === cierreFecha && t.sede === cierreSede && !t.esHistorico
   ).reduce((sum, tx) => sum + tx.valor, 0);
 
@@ -249,10 +262,20 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
          !t.esHistorico &&
          ((t.fechaIdentificacion ? t.fechaIdentificacion.slice(0, 10) : t.fecha) === cierreFecha)
   );
-  const totalIdentificadoCierre = identifiedTxsCierre.reduce((sum, tx) => sum + tx.valor, 0);
+  const rawIdentificadoCierre = identifiedTxsCierre.reduce((sum, tx) => sum + tx.valor, 0);
+
+  const totalBancoCierre = isAlreadyClosed && currentCierre && (rawBancoCierre === 0 && currentCierre.totalAplicativo > 0)
+    ? currentCierre.totalAplicativo
+    : rawBancoCierre;
+
+  const totalIdentificadoCierre = isAlreadyClosed && currentCierre && (rawIdentificadoCierre === 0 && (currentCierre.totalIdentificado || currentCierre.totalDeclarado))
+    ? (currentCierre.totalIdentificado ?? currentCierre.totalDeclarado ?? 0)
+    : rawIdentificadoCierre;
 
   // 3. Number of identified transactions
-  const numIdentificadosCierre = identifiedTxsCierre.length;
+  const numIdentificadosCierre = isAlreadyClosed && currentCierre && (identifiedTxsCierre.length === 0 && currentCierre.numeroIdentificados)
+    ? currentCierre.numeroIdentificados
+    : identifiedTxsCierre.length;
 
   // 4. Number of pending transactions
   const numPendientesCierre = transactions.filter(
@@ -260,7 +283,9 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
   ).length;
 
   // The difference/descuadre is totalIdentificadoCierre - totalBancoCierre
-  const diferenciaCierre = totalIdentificadoCierre - totalBancoCierre;
+  const diferenciaCierre = isAlreadyClosed && currentCierre && currentCierre.diferencia !== undefined
+    ? currentCierre.diferencia
+    : (totalIdentificadoCierre - totalBancoCierre);
 
   const handleGuardarCierre = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1586,6 +1611,115 @@ export default function Reportes({ transactions, currentUser, onRefreshData }: R
 
           </form>
 
+        </div>
+      )}
+
+      {/* Historial de Cierres de Caja Registrados y Bloqueados */}
+      {activeCierres.length > 0 && (
+        <div id="section-historial-cierres" className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
+            <div>
+              <h3 className="text-xs uppercase font-black tracking-widest text-[#1A2D7C] flex items-center gap-2 font-space">
+                <Lock className="h-4 w-4 text-emerald-600" />
+                Historial de Días Cerrados y Bloqueados ({activeCierres.length})
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Días con cierre de caja bloqueado. Haz clic en "Cargar en Formulario" para consultar el cuadre o gestionar su estado.
+              </p>
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 font-mono self-start sm:self-auto">
+              🔒 {activeCierres.filter(c => c.bloqueado !== false).length} Días Bloqueados
+            </span>
+          </div>
+
+          <div className="overflow-x-auto max-h-72">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-50 text-slate-500 uppercase font-black text-[9px] border-b border-slate-200 sticky top-0 font-space">
+                <tr>
+                  <th className="p-3">Sede</th>
+                  <th className="p-3">Fecha de Cierre</th>
+                  <th className="p-3">Cajera / Usuario</th>
+                  <th className="p-3 text-right">Monto Identificado</th>
+                  <th className="p-3 text-right">Monto en Banco</th>
+                  <th className="p-3 text-right">Diferencia</th>
+                  <th className="p-3 text-center">Estado</th>
+                  <th className="p-3 text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {activeCierres
+                  .sort((a, b) => b.fecha.localeCompare(a.fecha))
+                  .map((c) => {
+                    const isCurrentSelected = c.fecha === cierreFecha && c.sede === cierreSede;
+                    return (
+                      <tr 
+                        key={c.id || `${c.sede}_${c.fecha}`} 
+                        className={`transition-colors ${isCurrentSelected ? 'bg-indigo-50/70 font-semibold' : 'hover:bg-slate-50'}`}
+                      >
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                            c.sede === 'Guayabal' ? 'bg-indigo-50 text-indigo-700' :
+                            c.sede === 'Sabaneta' ? 'bg-orange-50 text-orange-700' :
+                            c.sede === 'Naranjal' ? 'bg-teal-50 text-teal-700' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {c.sede}
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono font-bold text-slate-800">
+                          {formatDateHuman(c.fecha)}
+                        </td>
+                        <td className="p-3 text-slate-600 font-medium">
+                          {c.nombreCajera || 'Cajera'}
+                        </td>
+                        <td className="p-3 text-right font-bold text-emerald-700 font-mono">
+                          {formatCOP(c.totalIdentificado ?? c.totalDeclarado ?? 0)}
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-700 font-mono">
+                          {formatCOP(c.totalAplicativo ?? 0)}
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold">
+                          <span className={(c.diferencia ?? 0) === 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                            {formatCOP(c.diferencia ?? ((c.totalIdentificado ?? c.totalDeclarado ?? 0) - (c.totalAplicativo ?? 0)))}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          {c.solicitaDesbloqueo ? (
+                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-black px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 text-amber-600" />
+                              Desbloqueo Solicitado
+                            </span>
+                          ) : c.bloqueado !== false ? (
+                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] font-black px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <Lock className="h-3 w-3 text-emerald-700" />
+                              BLOQUEADO
+                            </span>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-600 border border-slate-200 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                              Desbloqueado
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCierreFecha(c.fecha);
+                              setCierreSede(c.sede);
+                              const el = document.getElementById('section-cierre-caja');
+                              if (el) el.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            className="px-2.5 py-1 text-[10px] font-bold bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-[#1A2D7C] transition-all cursor-pointer shadow-2xs"
+                          >
+                            {isCurrentSelected ? 'Seleccionado' : 'Cargar en Formulario'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

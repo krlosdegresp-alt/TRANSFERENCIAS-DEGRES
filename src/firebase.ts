@@ -1529,10 +1529,17 @@ export function registrarCierreCaja(
     cierres.push(nuevoCierre);
   }
   
-  localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+  safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
   notifyListeners();
 
-  setDoc(doc(db, 'cierres', id), nuevoCierre).catch(e => {
+  const cleanCierre: Record<string, any> = {};
+  for (const [key, value] of Object.entries(nuevoCierre)) {
+    if (value !== undefined) {
+      cleanCierre[key] = value;
+    }
+  }
+
+  setDoc(doc(db, 'cierres', id), cleanCierre, { merge: true }).catch(e => {
     console.error("Error writing closure to Firestore:", e);
   });
 
@@ -1552,20 +1559,45 @@ export function importarCierresCajaBulk(nuevosCierres: CierreCaja[]): number {
   let count = 0;
 
   for (const c of nuevosCierres) {
-    const idx = cierres.findIndex(x => x.id === c.id);
+    const cleanC: CierreCaja = {
+      id: c.id,
+      fecha: c.fecha,
+      sede: c.sede,
+      nombreCajera: c.nombreCajera || 'Cajera',
+      numeroIdentificados: c.numeroIdentificados ?? 0,
+      totalIdentificado: c.totalIdentificado ?? 0,
+      totalAplicativo: c.totalAplicativo ?? 0,
+      coincide: c.coincide ?? (c.totalIdentificado === c.totalAplicativo),
+      motivoDiferencia: c.motivoDiferencia || null,
+      diferencia: c.diferencia ?? ((c.totalIdentificado ?? 0) - (c.totalAplicativo ?? 0)),
+      totalDeclarado: c.totalDeclarado ?? (c.totalIdentificado ?? 0),
+      fechaCreacion: c.fechaCreacion || getColombiaDateTime().dateTimeStr,
+      bloqueado: c.bloqueado !== false, // Ensure it is marked blocked
+      solicitaDesbloqueo: c.solicitaDesbloqueo || false,
+      motivoDesbloqueo: c.motivoDesbloqueo || null
+    };
+
+    const idx = cierres.findIndex(x => x.id === cleanC.id);
     if (idx >= 0) {
-      cierres[idx] = { ...cierres[idx], ...c };
+      cierres[idx] = { ...cierres[idx], ...cleanC };
     } else {
-      cierres.push(c);
+      cierres.push(cleanC);
     }
     count++;
 
-    setDoc(doc(db, 'cierres', c.id), c).catch(e => {
+    const firestoreClean: Record<string, any> = {};
+    for (const [key, value] of Object.entries(cleanC)) {
+      if (value !== undefined) {
+        firestoreClean[key] = value;
+      }
+    }
+
+    setDoc(doc(db, 'cierres', cleanC.id), firestoreClean, { merge: true }).catch(e => {
       console.error("Error bulk inserting closure to Firestore:", e);
     });
   }
 
-  localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+  safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
   notifyListeners();
   return count;
 }
@@ -1581,7 +1613,7 @@ export function solicitarDesbloqueoCierre(fecha: string, sede: Sede, motivo: str
       motivoDesbloqueo: motivo
     };
     cierres[idx] = updatedCierre;
-    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
+    safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify(cierres));
     notifyListeners();
 
     updateDoc(doc(db, 'cierres', id), {
@@ -1602,7 +1634,7 @@ export function aprobarDesbloqueoCierre(fecha: string, sede: Sede, adminUser: st
   const id = `cierre_${sede}_${fecha}`;
   const filtered = cierres.filter(c => c.id !== id);
   if (filtered.length !== cierres.length) {
-    localStorage.setItem(STORAGE_CIERRES_KEY, JSON.stringify(filtered));
+    safeSetLocalStorage(STORAGE_CIERRES_KEY, JSON.stringify(filtered));
     notifyListeners();
 
     deleteDoc(doc(db, 'cierres', id)).catch(e => {
